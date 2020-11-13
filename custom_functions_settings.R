@@ -1,7 +1,6 @@
 # R CUSTOM FUNCTIONS / SETTINGS FOR ANALYSES
 
 library(dplyr)
-library(beepr)
 
 ## is.nan function for data frames
 is.nan.data.frame <- function(x)
@@ -10,14 +9,15 @@ is.nan.data.frame <- function(x)
 ## notin
 `%notin%` <- Negate(`%in%`)
 
-## mode
+## mode (split ties randomly)
 Mode <- function(x) {
   ux <- unique(x)
-  ux[which.max(tabulate(match(x, ux)))]
+  ux[which.max(rank(tabulate(match(x, ux)), ties.method = "random"))]
 }
 
 ## percentile rank
-p_rank <- function(x) ifelse(is.na(x),NA,rank(x)/length(x[is.na(x) == FALSE]))
+percentile_rank <- function(x) 
+  ifelse(is.na(x),NA,rank(x)/length(x[is.na(x) == FALSE]))
 
 # function to get closest quantile value
 percentile_level <- function(x){
@@ -38,8 +38,7 @@ floor_any = function(x, accuracy, f=floor){f(x/ accuracy) * accuracy}
 # VIF from Zuur (2009)
 corvif <- function(dataz) {
   dataz <- as.data.frame(dataz)
-  
-  #vif part
+  # VIF
   form    <- formula(paste("fooy ~ ",paste(strsplit(names(dataz)," "),collapse=" + ")))
   dataz   <- data.frame(fooy=1 + rnorm(nrow(dataz)) ,dataz)
   lm_mod  <- lm(form,dataz)
