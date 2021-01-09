@@ -25,6 +25,10 @@ library(igraph)
 library(RColorBrewer)
 library(reshape2)
 library(rgexf)
+<<<<<<< HEAD
+=======
+library(UserNetR)
+>>>>>>> 3ecddb6dcc828fd0cdf9addfc24d8f5f7664fd15
 library(scales)
 library(gplots)
 library(raster)
@@ -36,18 +40,33 @@ library(sf)
 # PREPARE DATA FOR CLUSTER ANALYSIS
 # load raw Flickr data
 flickr_all <- read.csv("data/flickr_NFR_all.csv") 
+<<<<<<< HEAD
 flickr_public <- read.csv("data/flickr_NFR_public_land.csv")
 dim(flickr_all)
 # [1] 280509     25
 dim(flickr_public)
 # [1] 28461    21
 
+=======
+flickr_pub <- read.csv("data/flickr_NFR_public_land.csv")
+dim(flickr_all)
+# [1] 280509     25
+dim(flickr_pub)
+# [1] 28461    21
+
+library(clarifai)
+secret_id(c("flickr", "flickr-all-scopes"))
+get_token()
+tag_image_urls(flickr_rur_tidy$url[1])
+
+>>>>>>> 3ecddb6dcc828fd0cdf9addfc24d8f5f7664fd15
 # omit corrupted data (six rows with misplaced or missing column values)
 flickr_all <- flickr_all[!is.na(flickr_all$OBJECTID_12),]
 # omit non-rural images
 flickr_rural <- flickr_all[flickr_all$isUrban == 0,]
 # omit images without any tags
 flickr_rural %>%
+<<<<<<< HEAD
   filter(tags1 %notin% " " & tags2 %notin% " " & tags3 %notin% " " &
              tags4 %notin% " " & tags5 %notin% " " & tags6 %notin% " " &
              tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
@@ -58,6 +77,17 @@ flickr_public %>%
              tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
              tags10 %notin% " ") -> flickr_public_tags
 
+=======
+  filter(!(tags1 %in% " " & tags2 %in% " " & tags3 %in% " " &
+             tags4 %in% " " & tags5 %in% " " & tags6 %in% " " &
+             tags7 %in% " " & tags8 %in% " " & tags9 %in% " " &
+             tags10 %in% " ")) -> flickr_rural_tags
+flickr_pub %>%
+  filter(!(tags1 %in% " " & tags2 %in% " " & tags3 %in% " " &
+             tags4 %in% " " & tags5 %in% " " & tags6 %in% " " &
+             tags7 %in% " " & tags8 %in% " " & tags9 %in% " " &
+             tags10 %in% " ")) -> flickr_pub_tags
+>>>>>>> 3ecddb6dcc828fd0cdf9addfc24d8f5f7664fd15
 # get random sample of 500 images with both tags and user-provided captions for 
 # manual human cross-validation of automated tags versus intended photo target
 set.seed(131)
@@ -70,6 +100,7 @@ flickr_rural %>%
   mutate(datetime = mdy_hm(datetaken),
          date = date(datetime),
          month = month(date),
+<<<<<<< HEAD
          hour = hour(datetime),
          id = as.factor(id)) %>%
   distinct(id, .keep_all = TRUE) -> 
@@ -101,6 +132,45 @@ public_tags <- list(flickr_public_tags$tags1, flickr_public_tags$tags2, flickr_p
                  flickr_public_tags$tags10)
 
 rural_tag_freq <- as.data.frame(table(unlist(rural_tags))) %>%
+=======
+         hour = hour(datetime)) %>%
+  distinct(id, .keep_all = TRUE) -> 
+  flickr_rur_tidy
+
+flickr_pub %>%
+  mutate(datetime = mdy_hm(datetaken),
+         date = date(datetime),
+         month = month(date),
+         hour = hour(datetime)) %>%
+  distinct(id, .keep_all = TRUE) -> 
+  flickr_pub_tidy
+
+dim(flickr_rur_tidy)
+# [1] 149192     29
+dim(flickr_pub_tidy)
+# [1] 22325    25
+
+
+# rank tags by percentile, select tags past certain threshold for clustering
+rur_tags <- list(flickr_rur_tags$tags1, flickr_rur_tags$tags2, flickr_rur_tags$tags3, 
+             flickr_rur_tags$tags4, flickr_rur_tags$tags5, flickr_rur_tags$tags6,
+             flickr_rur_tags$tags7, flickr_rur_tags$tags8, flickr_rur_tags$tags9,
+             flickr_rur_tags$tags10)
+
+pub_tags <- list(flickr_pub_tags$tags1, flickr_pub_tags$tags2, flickr_pub_tags$tags3, 
+                 flickr_pub_tags$tags4, flickr_pub_tags$tags5, flickr_pub_tags$tags6,
+                 flickr_pub_tags$tags7, flickr_pub_tags$tags8, flickr_pub_tags$tags9,
+                 flickr_pub_tags$tags10)
+
+rur_tag_freq <- as.data.frame(table(unlist(rur_tags))) %>%
+  dplyr::select(tag = Var1, freq = Freq) %>%
+  filter(tag %notin% " ") %>%
+  arrange(desc(freq)) %>%
+  mutate(prop = freq / n_images,
+         pct = p_rank(freq)) 
+  
+pub_tag_freq <- as.data.frame(table(unlist(pub_tags))) %>%
+>>>>>>> 3ecddb6dcc828fd0cdf9addfc24d8f5f7664fd15
   dplyr::select(tag = Var1, freq = Freq) %>%
   filter(tag %notin% " ") %>%
   arrange(desc(freq)) %>%
@@ -209,6 +279,147 @@ tune_grid <- expand.grid(
   mod_se     = NA)
 
 modularity.l <- list()
+
+for (step in step.seq) {
+  modularity.m <- matrix(NA, nrow = n.iter, ncol = length(cluster.seq))
+  subset.ratio <- 0.8 # 80% of the tag dataset
+  set.seed(2000)
+  for (iter.idx in 1:n.iter) {
+    n.tags <- nrow(tags.m)
+    subset.idx <- (sample(1:n.tags, size = floor(n.tags*subset.ratio), 
+                          replace = F))
+    
+    # getting random subset of rural tag matrix
+    tags.m.subset.tmp <- (tags.m[subset.idx, subset.idx])
+    
+    # create undirected adjacency matrix from random tag matrix
+    fl.graph.subset.tmp <- graph.adjacency(tags.m.subset.tmp,
+                                           weighted=TRUE, 
+                                           mode="undirected",
+                                           diag=TRUE)
+    
+    # clustering based on the subsampled data
+    cw.subset.tmp <- cluster_walktrap(fl.graph.subset.tmp, 
+                                      weights = E(fl.graph.subset.tmp)$weight,
+                                      membership = T,
+                                      steps = step)
+    
+    # extract modularity score from algorithm run
+    modularity.tmp.v <- sapply(cluster.seq, FUN = function(x)  
+      modularity(fl.graph.subset.tmp, cut_at(cw.subset.tmp, no = x)))
+    modularity.m[iter.idx, ] <- modularity.tmp.v
+  }
+  
+  for (cluster in cluster.seq) {
+      tune_grid$mod[tune_grid$step == step & 
+                      tune_grid$cluster == cluster] <- 
+        median(modularity.m[,cluster])
+      tune_grid$mod_q025[tune_grid$step == step & 
+                           tune_grid$cluster == cluster] <- 
+        quantile(modularity.m[,cluster], 0.025)
+      tune_grid$mod_q975[tune_grid$step == step & 
+                           tune_grid$cluster == cluster] <- 
+        quantile(modularity.m[,cluster], 0.975)
+      tune_grid$mod_se[tune_grid$step == step & 
+                         tune_grid$cluster == cluster] <- 
+        sd(modularity.m[,cluster]/sqrt(nrow(tune_grid)))
+  }
+  modularity.l[[step]] <- modularity.m
+  cat(paste0(step, " steps!", " (", 
+             round((((step-min(step.seq))+1)/length(step.seq))*100,2), "%)"))
+}
+
+## (3) summarize MC modularity statistics
+
+## top 10 step and cluster sizes based on modularity
+tune_grid %>% 
+  dplyr::arrange(desc(mod)) %>%
+  filter(cluster != 1) %>%
+  head(10)
+
+## optimal tuning parameters
+opt.mod <- tune_grid[which.max(tune_grid$mod),]
+
+## plot full 2D modularity grid
+ggplot(tune_grid, aes(x = cluster, y = step, z = mod, fill = mod)) +
+  geom_tile() + 
+  geom_tile(data = opt.mod, color = "red") +
+  scale_x_continuous(breaks = seq(2, max(cluster.seq), 2), 
+                     expand = c(0, 0)) + 
+  scale_y_continuous(breaks = seq(min(step.seq), max(step.seq), 2), 
+                     expand = c(0, 0)) +
+  theme_bw() + mythemes +
+  labs(x = "clusters (k)", y = "steps (n)", fill = "modularity (Q)")
+
+ggsave("figures/modularity_tuning_grid.png")
+
+## modularity scores per cluster sizes for different steps
+ggplot(tune_grid, aes(x = cluster, y = mod)) +
+  geom_pointrange(aes(ymin = mod_q025, ymax = mod_q975), col = "grey25") +
+  facet_wrap(~step) + theme_light() + mythemes
+
+ggsave("figures/modularity_tuning_facets.png")
+
+## modularity scores w/ outer quantiles for different cluster sizes, using optimal step size
+## suggests that you don't necessarily get a huge benefit from more than 9 clusters
+tune_grid %>%
+  filter(step == opt.mod$step) %>%
+  ggplot(aes(x = cluster, y = mod)) +
+  geom_hline(aes(yintercept = opt.mod$mod_q025), lty = "dashed") +
+  geom_errorbar(aes(ymin = mod_q025, ymax = mod_q975), width = 0) +
+  geom_point(shape = 21, size = 2, fill = "white") + 
+  theme_bw() + mythemes
+
+ggsave("figures/modularity_quantiles_optimal_steps.png")
+
+## boxplot of modularity for different cluster sizes, using optimal step size
+
+png("figures/modularity_boxplot_optimal_steps.png", 
+    width=12, height=8, units='in', res=300)
+
+boxplot(modularity.l[[opt.mod$step]],
+        type="l", xlab= "clusters (k)", 
+        ylab= "modularity (Q)", 
+        main = paste("Modularity changing with k (Walktrap, steps = ", 
+                     opt.mod$step, ")"))
+
+dev.off()
+
+## (4) run full cluster analysis on full dataset of tags using optimal number of steps and clusters
+# create undirected adjacency matrix from full tag matrix
+fl.graph <- graph.adjacency(tags.m,
+                            weighted=TRUE, 
+                            mode="undirected",
+                            diag=TRUE)
+
+# clustering from full matrix
+cw <- cluster_walktrap(fl.graph, 
+                       weights = E(fl.graph)$weight,
+                       membership = T,
+                       steps = opt.mod$step)
+
+cw.cut <- cut_at(cw, no = 10)
+modularity(fl.graph, membership = cw.cut)
+table(cw.cut)
+
+## eigenvector ranking
+### Tag importance based on the whole network
+ec <- eigen_centrality(fl.graph)$vector
+cl <- closeness(fl.graph)
+bt <- betweenness(fl.graph)
+dg <- centr_degree(fl.graph)
+
+### output table of tags, community identity, and eigenvector centrality (importance)
+cw.comm <- data.frame(
+  tag = cw$names,
+  cluster = c(cw.cut),
+  eigen_centrality = ec,
+  betweenness = bt, 
+  closeness = cl, 
+  degree=dg
+)
+
+summary(dg$res)
 
 for (step in step.seq) {
   modularity.m <- matrix(NA, nrow = n.iter, ncol = length(cluster.seq))
