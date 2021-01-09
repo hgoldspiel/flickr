@@ -25,10 +25,6 @@ library(igraph)
 library(RColorBrewer)
 library(reshape2)
 library(rgexf)
-<<<<<<< HEAD
-=======
-library(UserNetR)
->>>>>>> 3ecddb6dcc828fd0cdf9addfc24d8f5f7664fd15
 library(scales)
 library(gplots)
 library(raster)
@@ -40,33 +36,18 @@ library(sf)
 # PREPARE DATA FOR CLUSTER ANALYSIS
 # load raw Flickr data
 flickr_all <- read.csv("data/flickr_NFR_all.csv") 
-<<<<<<< HEAD
 flickr_public <- read.csv("data/flickr_NFR_public_land.csv")
 dim(flickr_all)
 # [1] 280509     25
 dim(flickr_public)
 # [1] 28461    21
 
-=======
-flickr_pub <- read.csv("data/flickr_NFR_public_land.csv")
-dim(flickr_all)
-# [1] 280509     25
-dim(flickr_pub)
-# [1] 28461    21
-
-library(clarifai)
-secret_id(c("flickr", "flickr-all-scopes"))
-get_token()
-tag_image_urls(flickr_rur_tidy$url[1])
-
->>>>>>> 3ecddb6dcc828fd0cdf9addfc24d8f5f7664fd15
 # omit corrupted data (six rows with misplaced or missing column values)
 flickr_all <- flickr_all[!is.na(flickr_all$OBJECTID_12),]
 # omit non-rural images
 flickr_rural <- flickr_all[flickr_all$isUrban == 0,]
 # omit images without any tags
 flickr_rural %>%
-<<<<<<< HEAD
   filter(tags1 %notin% " " & tags2 %notin% " " & tags3 %notin% " " &
              tags4 %notin% " " & tags5 %notin% " " & tags6 %notin% " " &
              tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
@@ -77,17 +58,6 @@ flickr_public %>%
              tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
              tags10 %notin% " ") -> flickr_public_tags
 
-=======
-  filter(!(tags1 %in% " " & tags2 %in% " " & tags3 %in% " " &
-             tags4 %in% " " & tags5 %in% " " & tags6 %in% " " &
-             tags7 %in% " " & tags8 %in% " " & tags9 %in% " " &
-             tags10 %in% " ")) -> flickr_rural_tags
-flickr_pub %>%
-  filter(!(tags1 %in% " " & tags2 %in% " " & tags3 %in% " " &
-             tags4 %in% " " & tags5 %in% " " & tags6 %in% " " &
-             tags7 %in% " " & tags8 %in% " " & tags9 %in% " " &
-             tags10 %in% " ")) -> flickr_pub_tags
->>>>>>> 3ecddb6dcc828fd0cdf9addfc24d8f5f7664fd15
 # get random sample of 500 images with both tags and user-provided captions for 
 # manual human cross-validation of automated tags versus intended photo target
 set.seed(131)
@@ -100,7 +70,6 @@ flickr_rural %>%
   mutate(datetime = mdy_hm(datetaken),
          date = date(datetime),
          month = month(date),
-<<<<<<< HEAD
          hour = hour(datetime),
          id = as.factor(id)) %>%
   distinct(id, .keep_all = TRUE) -> 
@@ -131,46 +100,40 @@ public_tags <- list(flickr_public_tags$tags1, flickr_public_tags$tags2, flickr_p
                  flickr_public_tags$tags7, flickr_public_tags$tags8, flickr_public_tags$tags9,
                  flickr_public_tags$tags10)
 
-rural_tag_freq <- as.data.frame(table(unlist(rural_tags))) %>%
-=======
-         hour = hour(datetime)) %>%
-  distinct(id, .keep_all = TRUE) -> 
-  flickr_rur_tidy
-
-flickr_pub %>%
+flickr_rural %>%
   mutate(datetime = mdy_hm(datetaken),
          date = date(datetime),
          month = month(date),
          hour = hour(datetime)) %>%
   distinct(id, .keep_all = TRUE) -> 
-  flickr_pub_tidy
+  flickr_rural_tidy
 
-dim(flickr_rur_tidy)
+flickr_public %>%
+  mutate(datetime = ymd_hms(datetaken),
+         date = date(datetime),
+         month = month(date),
+         hour = hour(datetime)) %>%
+  distinct(id, .keep_all = TRUE) -> 
+  flickr_public_tidy
+
+dim(flickr_rural_tidy)
 # [1] 149192     29
-dim(flickr_pub_tidy)
+dim(flickr_public_tidy)
 # [1] 22325    25
 
 
 # rank tags by percentile, select tags past certain threshold for clustering
-rur_tags <- list(flickr_rur_tags$tags1, flickr_rur_tags$tags2, flickr_rur_tags$tags3, 
-             flickr_rur_tags$tags4, flickr_rur_tags$tags5, flickr_rur_tags$tags6,
-             flickr_rur_tags$tags7, flickr_rur_tags$tags8, flickr_rur_tags$tags9,
-             flickr_rur_tags$tags10)
+rural_tags <- list(flickr_rural_tags$tags1, flickr_rural_tags$tags2, flickr_rural_tags$tags3, 
+             flickr_rural_tags$tags4, flickr_rural_tags$tags5, flickr_rural_tags$tags6,
+             flickr_rural_tags$tags7, flickr_rural_tags$tags8, flickr_rural_tags$tags9,
+             flickr_rural_tags$tags10)
 
-pub_tags <- list(flickr_pub_tags$tags1, flickr_pub_tags$tags2, flickr_pub_tags$tags3, 
-                 flickr_pub_tags$tags4, flickr_pub_tags$tags5, flickr_pub_tags$tags6,
-                 flickr_pub_tags$tags7, flickr_pub_tags$tags8, flickr_pub_tags$tags9,
-                 flickr_pub_tags$tags10)
+public_tags <- list(flickr_public_tags$tags1, flickr_public_tags$tags2, flickr_public_tags$tags3, 
+                 flickr_public_tags$tags4, flickr_public_tags$tags5, flickr_public_tags$tags6,
+                 flickr_public_tags$tags7, flickr_public_tags$tags8, flickr_public_tags$tags9,
+                 flickr_public_tags$tags10)
 
-rur_tag_freq <- as.data.frame(table(unlist(rur_tags))) %>%
-  dplyr::select(tag = Var1, freq = Freq) %>%
-  filter(tag %notin% " ") %>%
-  arrange(desc(freq)) %>%
-  mutate(prop = freq / n_images,
-         pct = p_rank(freq)) 
-  
-pub_tag_freq <- as.data.frame(table(unlist(pub_tags))) %>%
->>>>>>> 3ecddb6dcc828fd0cdf9addfc24d8f5f7664fd15
+rural_tag_freq <- as.data.frame(table(unlist(rural_tags))) %>%
   dplyr::select(tag = Var1, freq = Freq) %>%
   filter(tag %notin% " ") %>%
   arrange(desc(freq)) %>%
