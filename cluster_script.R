@@ -1,5 +1,7 @@
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # R CODE FOR FLICKR-NFR CLUSTER ANALYSIS
 # Harrison B Goldspiel | hbgoldspiel@gmail.com
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 source("custom_functions_settings.R")
 
@@ -12,7 +14,7 @@ source("custom_functions_settings.R")
 ## 6. Use random forest & Boruta to identify core drivers of different themes (do this for each theme/state and theme/NFR total)
 ## 7. Look at partial effects or GAMs of the different themes
 
-# load packages
+# LOAD PACKAGES
 library(lubridate)
 library(maptools)
 library(spatstat)
@@ -33,14 +35,19 @@ library(lsa)
 library(intergraph)
 library(sf)
 
-# PREPARE DATA FOR CLUSTER ANALYSIS
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# PREPARE IMAGE DATA FOR CLUSTER ANALYSIS ------------------------------------
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 # load raw Flickr data
 flickr_all <- read.csv("data/flickr_NFR_all.csv") 
 flickr_public <- read.csv("data/flickr_NFR_public_land.csv")
+
 dim(flickr_all)
 # [1] 280509     25
 dim(flickr_public)
 # [1] 28461    21
+
 
 # omit corrupted data (six rows with misplaced or missing column values)
 flickr_all <- flickr_all[!is.na(flickr_all$OBJECTID_12),]
@@ -58,12 +65,15 @@ flickr_public %>%
              tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
              tags10 %notin% " ") -> flickr_public_tags
 
+
 # get random sample of 500 images with both tags and user-provided captions for 
 # manual human cross-validation of automated tags versus intended photo target
 set.seed(131)
 flickr_rural_tags$caption[flickr_rural_tags$caption == " "] <- NA
-tag_cap_samp <- sample_n(flickr_rural_tags[!is.na(flickr_rural_tags$caption),], 500)
+tag_cap_samp <- 
+  sample_n(flickr_rural_tags[!is.na(flickr_rural_tags$caption),], 500)
 write.csv(tag_cap_samp, "data/tag_cap_sample.csv", na = "", row.names = FALSE)
+
 
 # omit duplicate images from the Flickr dataset
 flickr_rural %>%
@@ -72,8 +82,7 @@ flickr_rural %>%
          month = month(date),
          hour = hour(datetime),
          id = as.factor(id)) %>%
-  distinct(id, .keep_all = TRUE) -> 
-  flickr_rural_tidy
+  distinct(id, .keep_all = TRUE) -> flickr_rural_tidy
 
 flickr_public %>%
   mutate(datetime = ymd_hms(datetaken),
@@ -81,8 +90,7 @@ flickr_public %>%
          month = month(date),
          hour = hour(datetime),
          id = as.factor(id)) %>%
-  distinct(id, .keep_all = TRUE) -> 
-  flickr_public_tidy
+  distinct(id, .keep_all = TRUE) -> flickr_public_tidy
 
 dim(flickr_rural_tidy)
 # [1] 149192     29
@@ -90,49 +98,22 @@ dim(flickr_public_tidy)
 # [1] 22325    25
 
 # rank tags by percentile, select tags past certain threshold for clustering
-rural_tags <- list(flickr_rural_tags$tags1, flickr_rural_tags$tags2, flickr_rural_tags$tags3, 
-             flickr_rural_tags$tags4, flickr_rural_tags$tags5, flickr_rural_tags$tags6,
-             flickr_rural_tags$tags7, flickr_rural_tags$tags8, flickr_rural_tags$tags9,
-             flickr_rural_tags$tags10)
+rural_tags <- 
+  list(
+    flickr_rural_tags$tags1, flickr_rural_tags$tags2, flickr_rural_tags$tags3, 
+    flickr_rural_tags$tags4, flickr_rural_tags$tags5, flickr_rural_tags$tags6,
+    flickr_rural_tags$tags7, flickr_rural_tags$tags8, flickr_rural_tags$tags9,
+    flickr_rural_tags$tags10
+    )
 
-public_tags <- list(flickr_public_tags$tags1, flickr_public_tags$tags2, flickr_public_tags$tags3, 
-                 flickr_public_tags$tags4, flickr_public_tags$tags5, flickr_public_tags$tags6,
-                 flickr_public_tags$tags7, flickr_public_tags$tags8, flickr_public_tags$tags9,
-                 flickr_public_tags$tags10)
-
-flickr_rural %>%
-  mutate(datetime = mdy_hm(datetaken),
-         date = date(datetime),
-         month = month(date),
-         hour = hour(datetime)) %>%
-  distinct(id, .keep_all = TRUE) -> 
-  flickr_rural_tidy
-
-flickr_public %>%
-  mutate(datetime = ymd_hms(datetaken),
-         date = date(datetime),
-         month = month(date),
-         hour = hour(datetime)) %>%
-  distinct(id, .keep_all = TRUE) -> 
-  flickr_public_tidy
-
-dim(flickr_rural_tidy)
-# [1] 149192     29
-dim(flickr_public_tidy)
-# [1] 22325    25
-
+public_tags <- 
+  list(flickr_public_tags$tags1, flickr_public_tags$tags2, flickr_public_tags$tags3, 
+       flickr_public_tags$tags4, flickr_public_tags$tags5, flickr_public_tags$tags6,
+       flickr_public_tags$tags7, flickr_public_tags$tags8, flickr_public_tags$tags9,
+       flickr_public_tags$tags10
+       )
 
 # rank tags by percentile, select tags past certain threshold for clustering
-rural_tags <- list(flickr_rural_tags$tags1, flickr_rural_tags$tags2, flickr_rural_tags$tags3, 
-             flickr_rural_tags$tags4, flickr_rural_tags$tags5, flickr_rural_tags$tags6,
-             flickr_rural_tags$tags7, flickr_rural_tags$tags8, flickr_rural_tags$tags9,
-             flickr_rural_tags$tags10)
-
-public_tags <- list(flickr_public_tags$tags1, flickr_public_tags$tags2, flickr_public_tags$tags3, 
-                 flickr_public_tags$tags4, flickr_public_tags$tags5, flickr_public_tags$tags6,
-                 flickr_public_tags$tags7, flickr_public_tags$tags8, flickr_public_tags$tags9,
-                 flickr_public_tags$tags10)
-
 rural_tag_freq <- as.data.frame(table(unlist(rural_tags))) %>%
   dplyr::select(tag = Var1, freq = Freq) %>%
   filter(tag %notin% " ") %>%
@@ -172,16 +153,21 @@ wordcloud(words = public_tag_freq$tag, freq = public_tag_freq$freq,
 par(mar = rep(0, 4))
 dev.off()
 
-# obtain sample of 500 images for exploring numerical ecology approaches
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Obtain sample of 500 images for exploring numerical ecology approaches -----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 set.seed(131)
 rural_sample <- sample_n(flickr_rural_tidy, 500)
 write.csv(rural_sample, "data/rural_sample.csv", na = "", row.names = FALSE)
+
 # convert sample dataset to community matrix with rows as photos and columns as tags
 ## create uniform levels for tags in the sample
 tag_levels = unique(c(rural_sample$tags1, rural_sample$tags2, rural_sample$tags3,
                     rural_sample$tags4, rural_sample$tags5, rural_sample$tags6,
                     rural_sample$tags7, rural_sample$tags8, rural_sample$tags9,
                     rural_sample$tags10))
+
 ## function to assign same levels to all tag columns
 tag.lev <- function(x) factor(as.factor(x), levels = tag_levels)
 rural_sample %>% 
@@ -195,13 +181,18 @@ rural_sample %>%
          id = rural_sample$id,
          state = rural_sample$STUSPS,
          date = rural_sample$date) %>%
-  dplyr::select(id, user, state, date, c(1:length(tag_levels))) ->
-  rural_mat
+  dplyr::select(id, user, state, date, c(1:length(tag_levels))) -> rural_mat
+
 # write new output csv file
 write.csv(rural_mat, "data/rural_mat.csv", na = "", row.names = FALSE)
 
 
-# RUN MONTE CARLO (MC) CLUSTER ANALYSIS-----------------------------------------
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# RUN MONTE CARLO (MC) CLUSTER ANALYSIS---------------------------------------
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 ## (1) create raw rural tag matrix
 ## (2) random sample 80% of rural tags over 1000 iterations, without replacement, 
 ## (3) and for each iteration, create tag co-occurence matrix and use Walktrap hierchical clustering algorithm, connecting clusters with Ward's distance, saving the modularity and cluster size
