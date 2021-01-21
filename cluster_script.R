@@ -34,6 +34,7 @@ library(xtable)
 library(lsa)
 library(intergraph)
 library(sf)
+library(vegan)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # PREPARE IMAGE DATA FOR CLUSTER ANALYSIS ------------------------------------
@@ -54,16 +55,16 @@ flickr_all <- flickr_all[!is.na(flickr_all$OBJECTID_12),]
 # omit non-rural images
 flickr_rural <- flickr_all[flickr_all$isUrban == 0,]
 # omit images without any tags
-flickr_rural %>%
+flickr_rural_tags <- flickr_rural %>%
   filter(tags1 %notin% " " & tags2 %notin% " " & tags3 %notin% " " &
              tags4 %notin% " " & tags5 %notin% " " & tags6 %notin% " " &
              tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
-             tags10 %notin% " ") -> flickr_rural_tags
-flickr_public %>%
+             tags10 %notin% " ")
+flickr_public_tags <- flickr_public %>%
   filter(tags1 %notin% " " & tags2 %notin% " " & tags3 %notin% " " &
              tags4 %notin% " " & tags5 %notin% " " & tags6 %notin% " " &
              tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
-             tags10 %notin% " ") -> flickr_public_tags
+             tags10 %notin% " ")
 
 
 # get random sample of 500 images with both tags and user-provided captions for 
@@ -76,21 +77,21 @@ write.csv(tag_cap_samp, "data/tag_cap_sample.csv", na = "", row.names = FALSE)
 
 
 # omit duplicate images from the Flickr dataset
-flickr_rural %>%
+flickr_rural_tidy <- flickr_rural %>%
   mutate(datetime = mdy_hm(datetaken),
          date = date(datetime),
          month = month(date),
          hour = hour(datetime),
          id = as.factor(id)) %>%
-  distinct(id, .keep_all = TRUE) -> flickr_rural_tidy
+  distinct(id, .keep_all = TRUE)
 
-flickr_public %>%
+flickr_public_tidy <- flickr_public %>%
   mutate(datetime = ymd_hms(datetaken),
          date = date(datetime),
          month = month(date),
          hour = hour(datetime),
          id = as.factor(id)) %>%
-  distinct(id, .keep_all = TRUE) -> flickr_public_tidy
+  distinct(id, .keep_all = TRUE)
 
 dim(flickr_rural_tidy)
 # [1] 149192     29
@@ -103,15 +104,13 @@ rural_tags <-
     flickr_rural_tags$tags1, flickr_rural_tags$tags2, flickr_rural_tags$tags3, 
     flickr_rural_tags$tags4, flickr_rural_tags$tags5, flickr_rural_tags$tags6,
     flickr_rural_tags$tags7, flickr_rural_tags$tags8, flickr_rural_tags$tags9,
-    flickr_rural_tags$tags10
-    )
+    flickr_rural_tags$tags10)
 
 public_tags <- 
   list(flickr_public_tags$tags1, flickr_public_tags$tags2, flickr_public_tags$tags3, 
        flickr_public_tags$tags4, flickr_public_tags$tags5, flickr_public_tags$tags6,
        flickr_public_tags$tags7, flickr_public_tags$tags8, flickr_public_tags$tags9,
-       flickr_public_tags$tags10
-       )
+       flickr_public_tags$tags10)
 
 # rank tags by percentile, select tags past certain threshold for clustering
 rural_tag_freq <- as.data.frame(table(unlist(rural_tags))) %>%
@@ -163,14 +162,14 @@ write.csv(rural_sample, "data/rural_sample.csv", na = "", row.names = FALSE)
 
 # convert sample dataset to community matrix with rows as photos and columns as tags
 ## create uniform levels for tags in the sample
-tag_levels = unique(c(rural_sample$tags1, rural_sample$tags2, rural_sample$tags3,
-                    rural_sample$tags4, rural_sample$tags5, rural_sample$tags6,
-                    rural_sample$tags7, rural_sample$tags8, rural_sample$tags9,
-                    rural_sample$tags10))
+tag_levels <- unique(c(rural_sample$tags1, rural_sample$tags2, rural_sample$tags3,
+                       rural_sample$tags4, rural_sample$tags5, rural_sample$tags6,
+                       rural_sample$tags7, rural_sample$tags8, rural_sample$tags9,
+                       rural_sample$tags10))
 
 ## function to assign same levels to all tag columns
 tag.lev <- function(x) factor(as.factor(x), levels = tag_levels)
-rural_sample %>% 
+rural_sample_mat <- rural_sample %>% 
   melt(id.vars = c("id", "tags1", "tags2", "tags3", "tags4", "tags5", 
                    "tags6", "tags7", "tags8", "tags9", "tags10")) %>%
   dcast(id ~ c(tags1, tags2, tags3, tags4, tags5, 
@@ -181,7 +180,92 @@ rural_sample %>%
          id = rural_sample$id,
          state = rural_sample$STUSPS,
          date = rural_sample$date) %>%
-  dplyr::select(id, user, state, date, c(1:length(tag_levels))) -> rural_mat
+  dplyr::select(id, user, state, date, c(1:length(tag_levels)))
+
+# run different cluster algorithms on Euclidean distance matrix
+tag.norm <- decostand(rural_sample_mat[,-c(1:4)], "normalize")
+tag.ch <- vegdist(tag.norm, "euc")
+attr(tag.ch, "labels") <- rural_sample_mat$id
+tag.ch.single <- hclust(tag.ch, method = "single") # single linkage
+tag.ch.complete <- hclust(tag.ch, method = "complete") # complete linkage
+tag.ch.UPGMA <- hclust(tag.ch, method = "average") # UPGMA agglomerate
+tag.ch.ward <- hclust(tag.ch, method = "ward.D2") # Ward's minimum variance
+
+# compare cluster performance with cophenetic correlations
+tag.ch.single.coph <- cophenetic(tag.ch.single)
+tag.ch.comp.coph <- cophenetic(tag.ch.complete)
+tag.ch.UPGMA.coph <- cophenetic(tag.ch.UPGMA)
+tag.ch.ward.coph <- cophenetic(tag.ch.ward)
+
+par(mfrow = c(2,2))
+plot(
+  tag.ch, 
+  tag.ch.single.coph, 
+  xlab = "Chord distance",
+  ylab = "Cophenetic distance",
+  asp = 1,
+  main = c("Single linkage", 
+           paste("Cophenetic correlation =",
+                 round(cor(tag.ch, tag.ch.single.coph), 3)))
+)
+abline(0,1)
+lines(lowess(tag.ch, tag.ch.single.coph), col = "red")
+plot(
+  tag.ch, 
+  tag.ch.comp.coph, 
+  xlab = "Chord distance",
+  ylab = "Cophenetic distance",
+  asp = 1,
+  main = c("Complete linkage", 
+           paste("Cophenetic correlation =",
+                 round(cor(tag.ch, tag.ch.comp.coph), 3)))
+)
+abline(0,1)
+lines(lowess(tag.ch, tag.ch.comp.coph), col = "red")
+plot(
+  tag.ch, 
+  tag.ch.UPGMA.coph, 
+  xlab = "Chord distance",
+  ylab = "Cophenetic distance",
+  asp = 1,
+  main = c("UPGMA", 
+           paste("Cophenetic correlation =",
+                 round(cor(tag.ch, tag.ch.UPGMA.coph), 3)))
+)
+abline(0,1)
+lines(lowess(tag.ch, tag.ch.UPGMA.coph), col = "red")
+plot(
+  tag.ch, 
+  tag.ch.ward.coph, 
+  xlab = "Chord distance",
+  ylab = "Cophenetic distance",
+  asp = 1,
+  main = c("Ward", 
+           paste("Cophenetic correlation =",
+                 round(cor(tag.ch, tag.ch.ward.coph), 3)))
+)
+abline(0,1)
+lines(lowess(tag.ch, tag.ch.ward.coph), col = "red")
+
+# the average (agglomerate, UPGMA) clustering method looks best
+# look for interpretable clusters by graphing "fusion levels" (may 20 clusters)
+par(mfrow = c(1,1))
+plot(
+  tag.ch.UPGMA$height[481:499],
+  20:2,
+  type = "S",
+  main = "Fusion levels - Chord - UPGMA",
+  ylab = "k (number of clusters)",
+  xlab = "h (node height)",
+  col = "grey"
+)
+text(tag.ch.UPGMA$height[481:499],
+     20:2,
+     20:2,
+     col = "red",
+     cex = 0.8) # looks like 12 clusters is best
+     
+
 
 # write new output csv file
 write.csv(rural_mat, "data/rural_mat.csv", na = "", row.names = FALSE)
@@ -493,7 +577,7 @@ cw <- cluster_walktrap(fl.graph,
                        membership = T,
                        steps = opt.mod$step)
 
-cw.cut <- cut_at(cw, no = 10)
+cw.cut <- cut_at(cw, no = 10) # increase this number to see if the clusters are more sensible OR re-do process one more time for the MEGA cluster
 modularity(fl.graph, membership = cw.cut)
 table(cw.cut)
 
