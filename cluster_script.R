@@ -17,30 +17,17 @@ source("custom_functions_settings.R")
 # LOAD PACKAGES
 library(beepr)
 library(lubridate)
-library(ggmap)
-library(rgdal)
 library(tidyverse)
 library(tidytext)
 library(wordcloud)
 library(igraph)
-library(qgraph)
-library(ggraph)
 library(reshape2)
-library(rgexf)
-library(scales)
-library(gplots)
-library(raster)
-library(xtable)
-library(intergraph)
-library(sf)
 library(vegan)
 library(recluster)
 library(pvclust)
 library(cluster)
 library(Rlda)
 library(labdsv)
-library(dendextend)
-library(picante)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # PREPARE IMAGE DATA FOR CLUSTER ANALYSIS ------------------------------------
@@ -696,10 +683,10 @@ rural.themes.plot <-
   ggplot(as.data.frame(sort(table(rural_photos_clustered[,"theme"]))),
        aes(x = Var1, y = Freq)) +
   geom_col() + 
-  geom_text(aes(label = round(Freq/sum(Freq), 3), y = Freq + 5000)) +
-  geom_text(aes(label = paste("n = ", Freq), y = Freq + 10000)) +
+  geom_text(aes(label = round(Freq/sum(Freq), 3), y = Freq + 1000, angle = 90)) +
+  geom_text(aes(label = paste("\ \ \ \ \ n = ", Freq), y = Freq + 5000), col = "grey50") +
   labs(x = "theme", y = "n (images)") + 
-  theme_classic() +
+  theme_classic() + coord_flip() +
   labs(title = "Rural image themes")
 
 rural.themes.plot
@@ -709,7 +696,7 @@ rural.themes.plot
 
 # repeat exercise above but after omitting tags that appear in over 10% of images
 ## (1) create original tag matrix
-rural_network_in <- 
+rural_network_in2 <- 
   flickr_rural_tidy_tagged %>%
   dplyr::select(id, tags1, tags2, tags3, tags4, tags5, 
                 tags6, tags7, tags8, tags9, tags10) %>%
@@ -722,21 +709,21 @@ rural_network_in <-
   dplyr::select(id, tag, freq)
 
 # create co-occurrence matrix
-tags.dt <- as.data.frame(crossprod(table(rural_network_in[1:2])))
+tags.dt2 <- as.data.frame(crossprod(table(rural_network_in2[1:2])))
 
 # reduce matrix appropriately for undirected cluster analysis
-tags.v <- colnames(tags.dt)
-tags.m <- (as.matrix(data.frame(tags.dt)))
-dimnames(tags.m) <- list(tags.v, tags.v)
-total.occur <- colSums(tags.m)
-tags.m[lower.tri(tags.m, diag=T)] <- 0
+tags.v2 <- colnames(tags.dt2)
+tags.m2 <- (as.matrix(data.frame(tags.dt2)))
+dimnames(tags.m2) <- list(tags.v2, tags.v2)
+total.occur <- colSums(tags.m2)
+tags.m2[lower.tri(tags.m2, diag=T)] <- 0
 
 ## (2-3) run MC cluster algorithm to obtain robust modularity plot, iterating over a range of random step sizes
 n.iter <- 100 # n MC iterations
 step.seq <- 3:8 # step range (range recommended by Pons & Lapaty (2005))
 cluster.seq <- 1:30 # cluster range
 
-tune_grid <- expand.grid(
+tune_grid2 <- expand.grid(
   step       = step.seq,
   cluster    = cluster.seq,
   mod        = NA,
@@ -744,18 +731,18 @@ tune_grid <- expand.grid(
   mod_q975   = NA,
   mod_se     = NA)
 
-modularity.l <- list()
+modularity.l2 <- list()
 set.seed(2000)
 for (step in step.seq) {
-  modularity.m <- matrix(NA, nrow = n.iter, ncol = length(cluster.seq))
+  modularity.m2 <- matrix(NA, nrow = n.iter, ncol = length(cluster.seq))
   subset.ratio <- 0.8 # 80% of the tag dataset
   for (iter.idx in 1:n.iter) {
-    n.tags <- nrow(tags.m)
+    n.tags <- nrow(tags.m2)
     subset.idx <- (sample(1:n.tags, size = floor(n.tags*subset.ratio), 
                           replace = F))
     
     # getting random subset of rural tag matrix
-    tags.m.subset.tmp <- (tags.m[subset.idx, subset.idx])
+    tags.m.subset.tmp <- (tags.m2[subset.idx, subset.idx])
     
     # create undirected adjacency matrix from random tag matrix
     fl.graph.subset.tmp <- graph_from_adjacency_matrix(tags.m.subset.tmp,
@@ -773,25 +760,25 @@ for (step in step.seq) {
     modularity.tmp.v <- sapply(cluster.seq, FUN = function(x)  
       modularity(fl.graph.subset.tmp, cut_at(cw.subset.tmp, no = x)))
     
-    modularity.m[iter.idx, ] <- modularity.tmp.v
+    modularity.m2[iter.idx, ] <- modularity.tmp.v
   }
   
   for (cluster in cluster.seq) {
-    tune_grid$mod[
-      tune_grid$step == step & 
-        tune_grid$cluster == cluster] <- median(modularity.m[,cluster])
-    tune_grid$mod_q025[
-      tune_grid$step == step &
-        tune_grid$cluster == cluster] <- quantile(modularity.m[,cluster], 0.025)
-    tune_grid$mod_q975[
-      tune_grid$step == step & 
-        tune_grid$cluster == cluster] <- quantile(modularity.m[,cluster], 0.975)
-    tune_grid$mod_se[
-      tune_grid$step == step & 
-        tune_grid$cluster == cluster] <- sd(modularity.m[,cluster]/
-                                              sqrt(nrow(tune_grid)))
+    tune_grid2$mod[
+      tune_grid2$step == step & 
+        tune_grid2$cluster == cluster] <- median(modularity.m2[,cluster])
+    tune_grid2$mod_q025[
+      tune_grid2$step == step &
+        tune_grid2$cluster == cluster] <- quantile(modularity.m2[,cluster], 0.025)
+    tune_grid2$mod_q975[
+      tune_grid2$step == step & 
+        tune_grid2$cluster == cluster] <- quantile(modularity.m2[,cluster], 0.975)
+    tune_grid2$mod_se[
+      tune_grid2$step == step & 
+        tune_grid2$cluster == cluster] <- sd(modularity.m2[,cluster]/
+                                              sqrt(nrow(tune_grid2)))
   }
-  modularity.l[[step]] <- modularity.m
+  modularity.l2[[step]] <- modularity.m2
   cat(paste0(step, " steps!", " (", 
              round((((step-min(step.seq))+1)/length(step.seq))*100,2), "%)"))
 } ; beep(3)
@@ -799,16 +786,16 @@ for (step in step.seq) {
 ## (3) summarize MC modularity statistics
 
 # top 10 step and cluster sizes based on modularity
-tune_grid %>% 
+tune_grid2 %>% 
   dplyr::arrange(desc(mod)) %>%
   filter(cluster != 1) %>%
   head(10)
 
 # optimal tuning parameters
-opt.mod <- tune_grid[which.max(tune_grid$mod),]
+opt.mod2 <- tune_grid2[which.max(tune_grid2$mod),]
 
 # plot full 2D modularity grid
-ggplot(tune_grid, aes(x = cluster, y = step, z = mod, fill = mod)) +
+ggplot(tune_grid2, aes(x = cluster, y = step, z = mod, fill = mod)) +
   geom_tile() + 
   geom_tile(data = opt.mod, color = "red") +
   scale_x_continuous(breaks = seq(2, max(cluster.seq), 2), 
@@ -821,7 +808,7 @@ ggplot(tune_grid, aes(x = cluster, y = step, z = mod, fill = mod)) +
 ggsave("figures/modularity_tuning_grid.png")
 
 # modularity scores per cluster sizes for different steps
-ggplot(tune_grid, aes(x = cluster, y = mod)) +
+ggplot(tune_grid2, aes(x = cluster, y = mod)) +
   geom_pointrange(aes(ymin = mod_q025, ymax = mod_q975), col = "grey25") +
   facet_wrap(~step) + theme_light() + mythemes
 
@@ -829,10 +816,10 @@ ggsave("figures/modularity_tuning_facets.png")
 
 # modularity scores w/ outer quantiles for different cluster sizes, using optimal step size
 # suggests that you don't necessarily get a huge benefit from more than 9 clusters
-tune_grid %>%
-  filter(step == opt.mod$step) %>%
+tune_grid2 %>%
+  filter(step == opt.mod2$step) %>%
   ggplot(aes(x = cluster, y = mod)) +
-  geom_hline(aes(yintercept = opt.mod$mod_q025), lty = "dashed") +
+  geom_hline(aes(yintercept = opt.mod2$mod_q025), lty = "dashed") +
   geom_errorbar(aes(ymin = mod_q025, ymax = mod_q975), width = 0) +
   geom_point(shape = 21, size = 2, fill = "white") + 
   theme_bw() + mythemes
@@ -844,7 +831,7 @@ ggsave("figures/modularity_quantiles_optimal_steps.png")
 png("figures/modularity_boxplot_optimal_steps.png", 
     width=12, height=8, units='in', res=300)
 
-boxplot(modularity.l[[opt.mod$step]],
+boxplot(modularity.l2[[opt.mod$step]],
         type="l", xlab= "clusters (k)", 
         ylab= "modularity (Q)", 
         main = paste("Modularity changing with k (Walktrap, steps = ", 
@@ -854,73 +841,73 @@ dev.off()
 
 ## (4) run full cluster analysis on full dataset of tags using optimal number of steps and clusters
 # create undirected adjacency matrix from full tag matrix
-fl.graph <- graph_from_adjacency_matrix(tags.m,
+fl.graph2 <- graph_from_adjacency_matrix(tags.m,
                                         weighted=TRUE, 
                                         mode="undirected",
                                         diag=TRUE)
 
 # clustering from full matrix
 set.seed(666)
-cw <- cluster_walktrap(fl.graph, 
-                       weights = E(fl.graph)$weight,
+cw2 <- cluster_walktrap(fl.graph2, 
+                       weights = E(fl.graph2)$weight,
                        membership = T,
-                       steps = opt.mod$step)
+                       steps = opt.mod2$step)
 
 # optimal number of clusters (based on 95% quantile range of top modularity)
 # nclust <- min(tune_grid$cluster[
   # tune_grid$step == opt.mod$step & tune_grid$mod_q975 >= 
     # tune_grid[which.max(tune_grid$mod),]$mod_q025])
 
-nclust <- opt.mod$cluster
+nclust2 <- opt.mod2$cluster
 
-cw.cut <- cut_at(cw, no = nclust)
-modularity(fl.graph, membership = cw.cut)
-table(cw.cut)
+cw.cut2 <- cut_at(cw, no = nclust2)
+modularity(fl.graph2, membership = cw.cut2)
+table(cw.cut2)
 
 ## eigenvector ranking
 ### Tag importance based on the whole network
-ec <- eigen_centrality(fl.graph)$vector
-cl <- closeness(fl.graph)
-bt <- betweenness(fl.graph)
-dg <- centr_degree(fl.graph)
+ec2 <- eigen_centrality(fl.graph2)$vector
+cl2 <- closeness(fl.graph2)
+bt2 <- betweenness(fl.graph2)
+dg2 <- centr_degree(fl.graph2)
 
 ### output table of tags, community identity, and eigenvector centrality (importance)
-cw.comm <- data.frame(
-  tag = cw$names,
-  cluster = c(cw.cut),
-  eigen_centrality = ec,
-  betweenness = bt, 
-  closeness = cl, 
-  degree=dg
+cw.comm2 <- data.frame(
+  tag = cw2$names,
+  cluster = c(cw.cut2),
+  eigen_centrality = ec2,
+  betweenness = bt2, 
+  closeness = cl2, 
+  degree=dg2
 )
 
-summary(dg$res)
+summary(dg2$res)
 
 pdf("figures/centrality_eigenvalue.pdf", width = 12, height = 8)
-barplot(sort(ec, decreasing = T)[1:30], las=2)
+barplot(sort(ec2, decreasing = T)[1:30], las=2)
 dev.off()
 
 pdf("figures/centrality_closeness.pdf", width = 12, height = 8)
-barplot(sort(cl, decreasing = T)[1:30], las=2)
+barplot(sort(cl2, decreasing = T)[1:30], las=2)
 dev.off()
 
 pdf("figures/centrality_betweenness.pdf", width = 12, height = 8)
-barplot(sort(bt, decreasing = T)[1:30], las=2)
+barplot(sort(bt2, decreasing = T)[1:30], las=2)
 dev.off()
 
-tag.ranks.omitted <- matrix(nrow = max(table(cw.cut)), ncol = nclust)
-for (clust in 1:nclust) {
-  cw.eigen.rank <- cw.comm %>%
+tag.ranks.omitted <- matrix(nrow = max(table(cw.cut2)), ncol = nclust2)
+for (clust in 1:nclust2) {
+  cw.eigen.rank <- cw.comm2 %>%
     filter(cluster == clust) %>%
     arrange(desc(eigen_centrality))
   if (
-    nrow(cw.eigen.rank) == max(table(cw.cut))
+    nrow(cw.eigen.rank) == max(table(cw.cut2))
   )
     tag.ranks.omitted[,clust] <- cw.eigen.rank$tag
   else
     tag.ranks.omitted[,clust] <- 
       c(cw.eigen.rank$tag, 
-        rep(NA, length = max(table(cw.cut))-nrow(cw.eigen.rank)))
+        rep(NA, length = max(table(cw.cut2))-nrow(cw.eigen.rank)))
 }
 
 tag.ranks.omitted
@@ -942,7 +929,7 @@ write.csv(tag.ranks.omitted, "data/rural_tag_clusters_toptagsomit.csv",
 ## 9:  transportation (20,24)                        [cars, trucks, buses, trains, bicycles, aircraft]
 ## 10: firearms and shooting (21,23,29)              [guns, hunting, and shooting ranges]
 
-cw.comm <- cw.comm %>%
+cw.comm2 <- cw.comm2 %>%
   mutate(theme = case_when(cluster %in% c(1,16,18,26,28) ~ "arts/sports",
                            cluster == 2 ~ "scenery",
                            cluster %in% c(3,6,7,8,14,15) ~ "food/dining",
@@ -984,30 +971,31 @@ assign.theme <- function(photos, clusters) {
   message("done!")
 }
 
-rural_photos_clustered <- assign.theme(photos = flickr_rural_tidy_tagged, 
-                                       clusters = cw.comm)
+rural_photos_clustered2 <- assign.theme(photos = flickr_rural_tidy_tagged, 
+                                       clusters = cw.comm2)
 
 # quick bar plot of cluster composition
 # quick bar plot of cluster composition
 rural.themes.plot2 <-
-  ggplot(as.data.frame(sort(table(rural_photos_clustered[,"theme"]))),
+  ggplot(as.data.frame(sort(table(rural_photos_clustered2[,"theme"]))),
          aes(x = Var1, y = Freq)) +
   geom_col() + 
-  geom_text(aes(label = round(Freq/sum(Freq), 3), y = Freq + 5000)) +
-  geom_text(aes(label = paste("n = ", Freq), y = Freq + 10000)) +
+  geom_text(aes(label = round(Freq/sum(Freq), 3), y = Freq + 1000, angle = 90)) +
+  geom_text(aes(label = paste("\ \ \ \ \ n = ", Freq), y = Freq + 5000), col = "grey50") +
   labs(x = "theme", y = "n (images)") + 
-  theme_classic() +
+  theme_classic() + coord_flip() +
   labs(title = "Rural image themes (common tags [>10% of photos] removed)")
 
 rural.themes.plot2
 
 library(ggpubr)
-ggarrange(rural.themes.plot, rural.themes.plot2,
-          nrow = 2)
+ggarrange(rural.themes.plot, rural.themes.plot2, nrow = 2)
 
 
+ggsave("figures/photo_themes_contr.png", 
+       width = 8, height = 8, units = "in", dpi = 600)
 
-
+beep(3)
 
 
 
