@@ -23,5 +23,16 @@ library(Boruta)
 
 
 # LOAD GIS DATA
+rastlist <- list.files(path = "data/GIS/baselayers", patter = '.tif$',
+                       all.files = TRUE, full.names = TRUE)
+rastdata <- stack(rastlist, quick = TRUE)
+names(rastdata) <- c("elev", "nlcd", "roads", "rough", "shores", 
+                     "slope", "urblarge", "urbmed", "urbsmall")
+ordered_names <- c("elev", "slope", "rough", "roads", "shores", 
+                   "nlcd", "urbsmall", "urbmed", "urblarge")
+rastdata <- rastdata[[ordered_names]]
+
+# EXTRACT GIS DATA FOR EACH IMAGE
+
 
 
