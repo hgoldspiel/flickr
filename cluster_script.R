@@ -6,8 +6,8 @@
 source("custom_functions_settings.R")
 
 # Image content clustering summary:
-## 1. Mine Flickr data for NFR fro 2012-2016 from open-source API 
-## 2. Run Flickr images through Clarifai image classification algorithm 
+## 1. Mine Flickr data for NFR fro 2012-2016 from open-source API (previously done by AS)
+## 2. Run Flickr images through Clarifai image classification algorithm (previously done by AS)
 ## 3. Perform cluster analysis on rural images to identify core themes of human engagement in rural parts of the NFR
 ## 4. Assign themes to images based on tag-theme composition
 
@@ -152,7 +152,7 @@ dev.off()
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# RUN MONTE CARLO (MC) CLUSTER ANALYSIS for rural and public land images--------
+# RUN MONTE CARLO (MC) CLUSTER ANALYSIS for rural and public land images------
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ## (1) create raw rural tag matrix
@@ -378,7 +378,9 @@ for (clust in 1:nclust) {
 tag.ranks
 write.csv(tag.ranks, "data/rural_tag_clusters.csv", na = "", row.names = FALSE)
 
-# ASSIGN CLUSTERS TO IMAGES BASED ON TAG CONTENT -------------------------------
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ASSIGN CLUSTERS TO IMAGES BASED ON TAG CONTENT -----------------------------
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ## aggregate clusters into core groups
 
@@ -466,4 +468,4 @@ rural.themes.plot
 ggsave("figures/rural_themes.png", width = 10, height = 7, dpi = 600)
 
 
-
+save.image(file = "data/cluster_analysis_output.RData")
