@@ -23,8 +23,6 @@ library(vegan)
 library(recluster)
 library(pvclust)
 library(cluster)
-library(Rlda)
-library(labdsv)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # PREPARE IMAGE DATA FOR CLUSTER ANALYSIS ------------------------------------
@@ -37,7 +35,7 @@ flickr_public <- read.csv("data/flickr_NFR_public_land.csv")
 dim(flickr_all)
 # [1] 280509     25
 dim(flickr_public)
-# [1] 28461    21
+# [1] 61296    21
 
 # omit corrupted data (six rows with misplaced or missing column values)
 flickr_all <- flickr_all[!is.na(flickr_all$OBJECTID_12),]
