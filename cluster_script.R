@@ -30,17 +30,23 @@ library(cluster)
 
 # load raw Flickr data
 flickr_all <- read.csv("data/flickr_NFR_all.csv") 
-flickr_public <- read.csv("data/flickr_NFR_public_land.csv")
-
-dim(flickr_all)
-# [1] 280509     25
-dim(flickr_public)
-# [1] 61296    21
-
 # omit corrupted data (six rows with misplaced or missing column values)
 flickr_all <- flickr_all[!is.na(flickr_all$OBJECTID_12),]
 # omit non-rural images
 flickr_rural <- flickr_all[flickr_all$isUrban == 0,]
+# load Flickr data in rural public zones
+flickr_public <- read.csv("data/flickr_NFR_public_landwater.csv")
+# extract rural images from private areas
+flickr_private <- flickr_rural[flickr_rural$id %notin% flickr_public$id,]
+
+dim(flickr_all)
+# [1] 280506     25
+dim(flickr_rural)
+# [1] 194682     25
+dim(flickr_public)
+# [1] 81621    21
+dim(flickr_private)
+# [1] 118179     25
 
 # omit images without any tags
 flickr_rural_tagged <- flickr_rural %>%
@@ -161,27 +167,15 @@ dev.off()
 
 ## (1) create original tag matrix
 rural_network_in <- 
-  flickr_rural_tidy_tagged %>%
+  flickr_rural_tidy %>%
   dplyr::select(id, tags1, tags2, tags3, tags4, tags5, 
                 tags6, tags7, tags8, tags9, tags10) %>%
   melt(id.vars = "id", value.name = "tag") %>%
-  # filter to omit rare tags (N < 5)
+  # filter to omit rare tags (N < 5) and empty tags
   filter(tag %in% rural_tag_freq$tag[rural_tag_freq$freq >= 5] & tag != "") %>%
   # filter to omit overly common tags 
   filter(tag %in% rural_tag_freq$tag[rural_tag_freq$prop < 0.10]) %>%
   left_join(rural_tag_freq, by = "tag") %>%
-  dplyr::select(id, tag, freq)
-
-public_network_in <- 
-  flickr_public_tidy_tagged %>%
-  dplyr::select(id, tags1, tags2, tags3, tags4, tags5, 
-                tags6, tags7, tags8, tags9, tags10) %>%
-  melt(id.vars = "id", value.name = "tag") %>%
-  # filter to omit rare tags (N < 5)
-  filter(tag %in% public_tag_freq$tag[public_tag_freq$freq >= 5] & tag != "") %>%
-  # filter to omit overly common tags
-  filter(tag %in% public_tag_freq$tag[public_tag_freq$prop < 0.10]) %>%
-  left_join(public_tag_freq, by = "tag") %>%
   dplyr::select(id, tag, freq)
 
 # create co-occurrence matrix
@@ -383,13 +377,13 @@ write.csv(tag.ranks, "data/rural_tag_clusters.csv", na = "", row.names = FALSE)
 ## aggregate clusters into core groups
 
 ## 1:  arts (1, 16, 27)                              [tech, music, photography]
-## 2:  sports (18, 21, 23, 26, 28, 29)*              [team sports, boxing, shooting, billiards]
+## 2:  sports (18, 21, 23, 26, 28, 29)               [team sports, boxing, shooting, billiards]
 ## 3:  scenery (2)**                                 [megacluster, mixture of natural and cultural landscape features]
 ## 4:  food/dining (3, 6, 8, 14, 15, 22)             [food, dessert, dining, alcohol] 
-## 5:  aquatic recreation (4, 5)                     [watercrafts, fishing, and watersports]
+## 5:  aquatic recreation (4, 5) **                  [watercrafts, fishing, and watersports]
 ## 6:  natural life (9, 11, 17, 19, 25)**            [flora, fauna, and fungi (and some livestock and zoo animals)]
 ## 7:  equestrian (10)                               [horses]
-## 8:  people (12)**                                 [people]
+## 8:  people (12)**                                 [megacluster, people]
 ## 9:  pets (13)                                     [dogs and cats]
 ## 10: transportation (20, 24)                       [cars, trucks, buses, trains, bicycles, aircraft]
 
@@ -437,8 +431,24 @@ assign.theme <- function(photos, clusters) {
   return(out.themes)
 }
 
-rural_photos_clustered <- assign.theme(photos = flickr_rural_tidy_tagged, 
+rural_photos_clustered <- assign.theme(photos = flickr_rural_tidy, 
                                        clusters = cw.comm)
+
+# summarize images by theme and region over year
+library(janitor)
+rural.image.trends <- 
+  rural_photos_clustered %>%
+  mutate(year = year(date)) %>% 
+  filter(year >= 2012 & year <= 2017) %>%
+  group_by(year,  STUSPS) %>%
+  summarize(count = n()) %>%
+  ungroup() %>%
+  dcast(year ~ STUSPS) %>%
+  adorn_totals("row") %>%
+  adorn_totals("col")
+
+rural.image.trends
+write.csv(rural.image.trends, "rural_images_by_year.csv", row.names = FALSE)
 
 # quick bar plot of cluster composition (mirror)
 rural.themes <-
@@ -452,18 +462,67 @@ rural.themes <-
   mutate(prop = round(count / sum(count), 3)) %>%
   ungroup()
 
-rural.themes.plot <-
-  ggplot(rural.themes, aes(x = reorder(theme, count), y = prop)) +
-  facet_wrap(~public, nrow = 2) +
-  geom_col() +
-  geom_text(aes(label = paste("n = ", count), y = prop + 0.1)) +
-  geom_text(aes(label = prop, y = prop + 0.2)) +
-  labs(x = "Theme", y = "Proportion of images") +
+rural.themes
+
+total.themes <- 
+  rural_photos_clustered %>%
+  group_by(theme) %>%
+  summarize(count = n()) %>%
+  na.omit() %>%
+  ungroup() %>%
+  arrange(desc(count)) %>%
+  mutate(prop = round(count / sum(count), 3))
+
+total.themes
+
+write.csv(rural.themes, "data/public_private_props.csv", row.names = FALSE)
+write.csv(total.themes, "data/rural_props.csv", row.names = FALSE)
+
+# update this to mirror each other on the y axis, ranked by rural proportions
+# show the rural proportions on each size as outlines
+private.themes.plot <- 
+  rural.themes %>%
+  filter(public == "private") %>%
+  mutate(theme = factor(theme, levels = rev(total.themes$theme))) %>%
+  ggplot(aes(x = theme, y = prop)) +
+  scale_y_reverse(limits=c(1,0)) +
+  geom_col(fill = "grey", col = "grey") +
+  geom_col(data = total.themes, col = "black", fill = "black", width = 0.3) +
+  coord_flip() +
+  theme_bw() + mythemes +
+  labs(title = "Private", x = NULL, y = "Proportion of images") +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+        plot.title = element_text(hjust = 0.5))
+
+theme.cats.plot <- 
+  ggplot(total.themes, aes(x = theme, y = prop)) +
+  geom_text(inherit.aes = FALSE, data = total.themes, 
+            aes(x = factor(theme, levels = rev(theme)), 
+                y = rep(0.5, 10), label = theme), size = 5) +
+  ylim(c(0,1)) +
+  coord_flip() +
   theme_bw() + 
-  labs(title = "Rural image themes")
+  theme(line = element_blank(), rect = element_blank(),
+        axis.text = element_blank(), axis.ticks = element_blank()) +
+  labs(title = " ", x = NULL, y = " ")
+  
+public.themes.plot <- 
+  rural.themes %>%
+  filter(public == "public") %>%
+  mutate(theme = factor(theme, levels = rev(total.themes$theme))) %>%
+  ggplot(aes(x = theme, y = prop)) +
+  ylim(c(0,1)) +
+  geom_col(fill = "grey", col = "grey") +
+  geom_col(data = total.themes, col = "black", fill = "black", width = 0.3) +
+  coord_flip() +
+  theme_bw() + mythemes +
+  labs(title = "Public", x = NULL, y = "Proportion of images") +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+        plot.title = element_text(hjust = 0.5))
 
-rural.themes.plot
-ggsave("figures/rural_themes.png", width = 10, height = 7, dpi = 600)
+ggarrange(private.themes.plot, theme.cats.plot, public.themes.plot, 
+          nrow = 1, widths = c(1,0.35,1), labels = c("A", "", "B"), align = "hv")
 
+ggsave("figures/rural_image_composition.png", width = 10, height = 5, dpi = 600)
 
 save.image(file = "data/cluster_analysis_output.RData")
