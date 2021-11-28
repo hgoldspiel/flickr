@@ -1,6 +1,6 @@
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # R CODE FOR FLICKR-NFR CLUSTER ANALYSIS
-# Harrison B Goldspiel | hbgoldspiel@gmail.com
+# Harrison B Goldspiel | harrison.goldspiel@maine.edu
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 source("custom_functions_settings.R")
@@ -36,17 +36,18 @@ flickr_all <- flickr_all[!is.na(flickr_all$OBJECTID_12),]
 flickr_rural <- flickr_all[flickr_all$isUrban == 0,]
 # load Flickr data in rural public zones
 flickr_public <- read.csv("data/flickr_NFR_public_landwater.csv")
+flickr_public$STUSPS <- flickr_all$STUSPS[flickr_all$id %in% flickr_public$id]
 # extract rural images from private areas
 flickr_private <- flickr_rural[flickr_rural$id %notin% flickr_public$id,]
 
 dim(flickr_all)
-# [1] 280506     25
+# [1] 280503     25
 dim(flickr_rural)
 # [1] 194682     25
-dim(flickr_public)
-# [1] 81621    21
 dim(flickr_private)
 # [1] 118179     25
+dim(flickr_public)
+# [1] 81621    22
 
 # omit images without any tags
 flickr_rural_tagged <- flickr_rural %>%
@@ -73,6 +74,14 @@ flickr_rural_tidy <- flickr_rural %>%
          id = as.factor(id)) %>%
   distinct(id, .keep_all = TRUE)
 
+flickr_private_tidy <- flickr_private %>%
+  mutate(datetime = mdy_hm(datetaken),
+         date = date(datetime),
+         month = month(date),
+         hour = hour(datetime),
+         id = as.factor(id)) %>%
+  distinct(id, .keep_all = TRUE)
+
 flickr_public_tidy <- flickr_public %>%
   mutate(datetime = ymd_hms(datetaken),
          date = date(datetime),
@@ -82,78 +91,218 @@ flickr_public_tidy <- flickr_public %>%
   distinct(id, .keep_all = TRUE)
 
 dim(flickr_rural_tidy)
-# [1] 149192     29
+# [1] 148953    29
+dim(flickr_private_tidy)
+# [1] 93472    29
 dim(flickr_public_tidy)
-# [1] 22325    25
+# [1] 58817    25
 
-flickr_rural_tidy_tagged <- flickr_rural_tidy %>%
-  filter(tags1 %notin% " " & tags2 %notin% " " & tags3 %notin% " " &
-             tags4 %notin% " " & tags5 %notin% " " & tags6 %notin% " " &
-             tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
-             tags10 %notin% " ")
-flickr_public_tidy_tagged <- flickr_public_tidy %>%
-  filter(tags1 %notin% " " & tags2 %notin% " " & tags3 %notin% " " &
-             tags4 %notin% " " & tags5 %notin% " " & tags6 %notin% " " &
-             tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
-             tags10 %notin% " ")
+# visualize photography over months and time of day
+## hourly image trends
+hourly.trends.fun <- function(data) {
+  states.df.list <- list()
+  for(state in c("NY", "VT", "NH", "ME")) {
+    states.df.list[[state]] <- data.frame(table(data$hour[data$STUSPS == state]))
+    colnames(states.df.list[[state]]) <- c("Hour", "Freq")
+  }
+  states.hourly <- rbind(states.df.list[["NY"]], states.df.list[["VT"]],
+                         states.df.list[["NH"]], states.df.list[["ME"]])
+  states.hourly$State <- c(rep("NY", 24), rep("VT", 24), 
+                                  rep("NH", 24), rep("ME", 24))
+  states.hourly$Hour <- as.integer(states.hourly$Hour)-1
+  states.hourly$State = factor(states.hourly$State, 
+                               levels = c("NY", "VT", "NH", "ME"))
+  return(states.hourly)
+}
+
+states.public.hourly <- hourly.trends.fun(flickr_public_tidy)
+states.private.hourly <- hourly.trends.fun(flickr_private_tidy)
+states.hourly <- hourly.trends.fun(flickr_rural_tidy)
+
+# bar plots separated by state
+colors <- c("Rural" = "grey", 
+            "Public" = "forestgreen", 
+            "Private" = "black")
+
+hourly.trends.plot <-
+  ggplot(states.public.hourly, aes(x = Hour, y = Freq)) + 
+  geom_col(data = states.hourly, inherit.aes = FALSE,
+           aes(x = Hour, y = Freq, fill = "Rural")) +
+  geom_col(data = states.hourly, inherit.aes = FALSE,
+           aes(x = Hour, y = -Freq, fill = "Rural")) +
+  geom_col(aes(fill = "Public"), width = 0.5) + 
+  geom_col(data = states.private.hourly, width = 0.5,
+           inherit.aes = FALSE, aes(x = Hour, y = -Freq, fill = "Private")) +
+  facet_grid(~State) +
+  theme_bw() + mythemes + labs(x = NULL, y = NULL, fill = NULL) +
+  scale_fill_manual(values = colors) +
+  scale_x_continuous(breaks = 0:24, labels = c("24/0", as.character(1:24)), 
+                     expand = c(.002,0)) +
+  coord_polar(start = -.13) +
+  theme(legend.position = "bottom", legend.text = element_text(size = 12),
+        panel.border = element_blank(), strip.background = element_blank(), 
+        axis.text.x = element_text(size = 11), axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(), panel.spacing = unit(1, "lines"))
+
+## monthly image trends
+monthly.trends.fun <- function(data) {
+  states.df.list <- list()
+  for(state in c("NY", "VT", "NH", "ME")) {
+    states.df.list[[state]] <- data.frame(table(data$month[data$STUSPS == state]))
+    colnames(states.df.list[[state]]) <- c("Month", "Freq")
+  }
+  states.monthly <- rbind(states.df.list[["NY"]], states.df.list[["VT"]],
+                         states.df.list[["NH"]], states.df.list[["ME"]])
+  states.monthly$State <- c(rep("NY", 12), rep("VT", 12), 
+                           rep("NH", 12), rep("ME", 12))
+  states.monthly$Month <- as.integer(states.monthly$Month)
+  states.monthly$State = factor(states.monthly$State, 
+                               levels = c("NY", "VT", "NH", "ME"))
+  return(states.monthly)
+}
+states.public.monthly <- monthly.trends.fun(flickr_public_tidy)
+states.private.monthly <- monthly.trends.fun(flickr_private_tidy)
+states.monthly <- monthly.trends.fun(flickr_rural_tidy)
+
+monthly.trends.plot <- 
+  ggplot(states.public.monthly, aes(x = factor(Month), y = Freq)) + 
+  geom_col(data = states.monthly, inherit.aes = FALSE,
+           aes(x = factor(Month), y = Freq, fill = "Rural")) +
+  geom_col(data = states.monthly, inherit.aes = FALSE,
+           aes(x = factor(Month), y = -Freq, fill = "Rural")) +
+  geom_col(aes(fill = "Public"), width = 0.5) + 
+  geom_col(data = states.private.monthly, width = 0.5,
+           inherit.aes = FALSE, aes(x = Month, y = -Freq, fill = "Private")) +
+  facet_grid(~State) +
+  scale_fill_manual(values = colors) +
+  theme_bw() + mythemes + labs(x = NULL, y = NULL, fill = NULL) +
+  scale_x_discrete(breaks = c(1:12), labels = month.abb) + 
+  coord_polar(start = 6) +
+  theme(legend.position = "bottom", legend.text = element_text(size = 12),
+        panel.border = element_blank(), strip.background = element_blank(), 
+        strip.text.x = element_blank(), axis.text.x = element_text(size = 11), 
+        axis.text.y = element_blank(), axis.ticks.y = element_blank())
+
+ggarrange(hourly.trends.plot, monthly.trends.plot, 
+          common.legend = TRUE, legend = "bottom",
+          nrow = 2, labels = c("A", "B"), align = "v")
+
+ggsave("figures/rural_image_trends.png", width = 10, height = 6, dpi = 600)
 
 # rank tags by percentile, select tags past certain threshold for clustering
-rural_tags <- 
+# get list of images with all 10 tags
+flickr_rural_tidy_tagged <- flickr_rural_tidy %>%
+  filter(tags1 %notin% " " & tags2 %notin% " " & tags3 %notin% " " &
+           tags4 %notin% " " & tags5 %notin% " " & tags6 %notin% " " &
+           tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
+           tags10 %notin% " ")
+flickr_private_tidy_tagged <- flickr_private_tidy %>%
+  filter(tags1 %notin% " " & tags2 %notin% " " & tags3 %notin% " " &
+           tags4 %notin% " " & tags5 %notin% " " & tags6 %notin% " " &
+           tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
+           tags10 %notin% " ")
+flickr_public_tidy_tagged <- flickr_public_tidy %>%
+  filter(tags1 %notin% " " & tags2 %notin% " " & tags3 %notin% " " &
+           tags4 %notin% " " & tags5 %notin% " " & tags6 %notin% " " &
+           tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
+           tags10 %notin% " ")
+
+# rank tags by percentile, select tags past certain threshold for clustering
+rural_tidy_tags <- 
   list(flickr_rural_tidy_tagged$tags1, flickr_rural_tidy_tagged$tags2, 
        flickr_rural_tidy_tagged$tags3, flickr_rural_tidy_tagged$tags4, 
        flickr_rural_tidy_tagged$tags5, flickr_rural_tidy_tagged$tags6,
        flickr_rural_tidy_tagged$tags7, flickr_rural_tidy_tagged$tags8, 
        flickr_rural_tidy_tagged$tags9, flickr_rural_tidy_tagged$tags10)
 
-public_tags <- 
+private_tidy_tags <- 
+  list(flickr_private_tidy_tagged$tags1, flickr_private_tidy_tagged$tags2, 
+       flickr_private_tidy_tagged$tags3, flickr_private_tidy_tagged$tags4, 
+       flickr_private_tidy_tagged$tags5, flickr_private_tidy_tagged$tags6,
+       flickr_private_tidy_tagged$tags7, flickr_private_tidy_tagged$tags8, 
+       flickr_private_tidy_tagged$tags9, flickr_private_tidy_tagged$tags10)
+
+public_tidy_tags <- 
   list(flickr_public_tidy_tagged$tags1, flickr_public_tidy_tagged$tags2, 
        flickr_public_tidy_tagged$tags3, flickr_public_tidy_tagged$tags4, 
        flickr_public_tidy_tagged$tags5, flickr_public_tidy_tagged$tags6,
        flickr_public_tidy_tagged$tags7, flickr_public_tidy_tagged$tags8, 
        flickr_public_tidy_tagged$tags9, flickr_public_tidy_tagged$tags10)
 
-rural_tag_freq <- as.data.frame(table(unlist(rural_tags))) %>%
+rural_tidy_tag_freq <- as.data.frame(table(unlist(rural_tidy_tags))) %>%
   dplyr::select(tag = Var1, freq = Freq) %>%
   filter(tag %notin% " ") %>%
   arrange(desc(freq)) %>%
-  mutate(prop = freq / length(rural_tags[[1]]),
+  mutate(prop = freq / length(rural_tidy_tags[[1]]),
          pct = percentile_rank(freq)) 
-  
-public_tag_freq <- as.data.frame(table(unlist(public_tags))) %>%
+
+private_tidy_tag_freq <- as.data.frame(table(unlist(private_tidy_tags))) %>%
   dplyr::select(tag = Var1, freq = Freq) %>%
   filter(tag %notin% " ") %>%
   arrange(desc(freq)) %>%
-  mutate(prop = freq / length(public_tags[[1]]),
+  mutate(prop = freq / length(private_tidy_tags[[1]]),
+         pct = percentile_rank(freq)) 
+
+public_tidy_tag_freq <- as.data.frame(table(unlist(public_tidy_tags))) %>%
+  dplyr::select(tag = Var1, freq = Freq) %>%
+  filter(tag %notin% " ") %>%
+  arrange(desc(freq)) %>%
+  mutate(prop = freq / length(public_tidy_tags[[1]]),
          pct = percentile_rank(freq))
 
-write.csv(rural_tag_freq, "data/rural_tags.csv")
-write.csv(public_tag_freq, "data/public_tags.csv")
+# tag rankings for all photos
+rural_all_tags <- 
+  list(flickr_rural_tidy$tags1, flickr_rural_tidy$tags2, 
+       flickr_rural_tidy$tags3, flickr_rural_tidy$tags4, 
+       flickr_rural_tidy$tags5, flickr_rural_tidy$tags6,
+       flickr_rural_tidy$tags7, flickr_rural_tidy$tags8, 
+       flickr_rural_tidy$tags9, flickr_rural_tidy$tags10)
+
+private_all_tags <- 
+  list(flickr_private_tidy$tags1, flickr_private_tidy$tags2, 
+       flickr_private_tidy$tags3, flickr_private_tidy$tags4, 
+       flickr_private_tidy$tags5, flickr_private_tidy$tags6,
+       flickr_private_tidy$tags7, flickr_private_tidy$tags8, 
+       flickr_private_tidy$tags9, flickr_private_tidy$tags10)
+
+public_all_tags <- 
+  list(flickr_public_tidy$tags1, flickr_public_tidy$tags2, 
+       flickr_public_tidy$tags3, flickr_public_tidy$tags4, 
+       flickr_public_tidy$tags5, flickr_public_tidy$tags6,
+       flickr_public_tidy$tags7, flickr_public_tidy$tags8, 
+       flickr_public_tidy$tags9, flickr_public_tidy$tags10)
+
+rural_tag_freq <- as.data.frame(table(unlist(rural_all_tags))) %>%
+  dplyr::select(tag = Var1, freq = Freq) %>%
+  filter(tag %notin% " ") %>%
+  arrange(desc(freq)) %>%
+  mutate(prop = freq / length(rural_all_tags[[1]]),
+         pct = percentile_rank(freq)) 
+
+private_tag_freq <- as.data.frame(table(unlist(private_all_tags))) %>%
+  dplyr::select(tag = Var1, freq = Freq) %>%
+  filter(tag %notin% " ") %>%
+  arrange(desc(freq)) %>%
+  mutate(prop = freq / length(private_all_tags[[1]]),
+         pct = percentile_rank(freq)) 
+  
+public_tag_freq <- as.data.frame(table(unlist(public_all_tags))) %>%
+  dplyr::select(tag = Var1, freq = Freq) %>%
+  filter(tag %notin% " ") %>%
+  arrange(desc(freq)) %>%
+  mutate(prop = freq / length(public_all_tags[[1]]),
+         pct = percentile_rank(freq))
+
+# export rankings
+write.csv(rural_tidy_tag_freq, "data/rural_tidy_tags.csv")
+write.csv(private_tidy_tag_freq, "data/private_tidy_tags.csv")
+write.csv(public_tidy_tag_freq, "data/public_tidy_tags.csv")
+write.csv(rural_tag_freq, "data/rural_all_tags.csv")
+write.csv(private_tag_freq, "data/private_all_tags.csv")
+write.csv(public_tag_freq, "data/public_all_tags.csv")
 
 # list of uncommon (N < 5 images) tags
 rare_tags <- as.character(rural_tag_freq$tag[rural_tag_freq$freq < 5])
-
-# word cloud of frequently (i.e., N >= 5 images)  occurring tags in rural areas
-png("figures/flickr_rural_toptags.png", 
-    width=12, height=8, units='in', res=300)
-set.seed(140)   
-wordcloud(words = rural_tag_freq$tag, freq = rural_tag_freq$freq, 
-          min.freq = 5, max.words = Inf, scale=c(8,0.2), 
-          colors=brewer.pal(6, "Dark2"), random.order=FALSE, 
-          rot.per=0.15)  
-par(mar = rep(0, 4))
-dev.off()
-
-# word cloud of frequently (i.e., N >= 5 images)  occurring tags in public lands
-png("figures/flickr_public_toptags.png", 
-    width=12, height=8, units='in', res=300)
-set.seed(140)   
-wordcloud(words = public_tag_freq$tag, freq = public_tag_freq$freq, 
-          min.freq = 5, max.words = Inf, scale=c(8,0.2), 
-          colors=brewer.pal(6, "Dark2"), random.order=FALSE, 
-          rot.per=0.15)  
-par(mar = rep(0, 4))
-dev.off()
-
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # RUN MONTE CARLO (MC) CLUSTER ANALYSIS for rural and public land images------
@@ -172,10 +321,10 @@ rural_network_in <-
                 tags6, tags7, tags8, tags9, tags10) %>%
   melt(id.vars = "id", value.name = "tag") %>%
   # filter to omit rare tags (N < 5) and empty tags
-  filter(tag %in% rural_tag_freq$tag[rural_tag_freq$freq >= 5] & tag != "") %>%
+  filter(tag %in% rural_tidy_tag_freq$tag[rural_tidy_tag_freq$freq >= 5] & tag != "") %>%
   # filter to omit overly common tags 
-  filter(tag %in% rural_tag_freq$tag[rural_tag_freq$prop < 0.10]) %>%
-  left_join(rural_tag_freq, by = "tag") %>%
+  filter(tag %in% rural_tidy_tag_freq$tag[rural_tidy_tag_freq$prop < 0.10]) %>%
+  left_join(rural_tidy_tag_freq, by = "tag") %>%
   dplyr::select(id, tag, freq)
 
 # create co-occurrence matrix
@@ -272,7 +421,7 @@ opt.mod <- rural_mcmc_wt$tune_grid[
 ggplot(rural_mcmc_wt$tune_grid, 
        aes(x = cluster, y = step, z = mod, fill = mod)) +
   geom_tile() + 
-  geom_tile(data = opt.mod, color = "red") +
+  geom_tile(data = opt.mod, color = "red", size = 2) +
   scale_x_continuous(breaks = seq(2, max(rural_mcmc_wt$cluster_seq), 2), 
                      expand = c(0, 0)) + 
   scale_y_continuous(breaks = seq(min(rural_mcmc_wt$step_seq), 
@@ -367,7 +516,6 @@ for (clust in 1:nclust) {
         rep(NA, length = max(table(cw.cut))-nrow(cw.eigen.rank)))
   }
 
-tag.ranks
 write.csv(tag.ranks, "data/rural_tag_clusters.csv", na = "", row.names = FALSE)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -375,30 +523,52 @@ write.csv(tag.ranks, "data/rural_tag_clusters.csv", na = "", row.names = FALSE)
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ## aggregate clusters into core groups
+## ** indicates a megacluster
 
-## 1:  arts (1, 16, 27)                              [tech, music, photography]
-## 2:  sports (18, 21, 23, 26, 28, 29)               [team sports, boxing, shooting, billiards]
-## 3:  scenery (2)**                                 [megacluster, mixture of natural and cultural landscape features]
-## 4:  food/dining (3, 6, 8, 14, 15, 22)             [food, dessert, dining, alcohol] 
-## 5:  aquatic recreation (4, 5) **                  [watercrafts, fishing, and watersports]
-## 6:  natural life (9, 11, 17, 19, 25)**            [flora, fauna, and fungi (and some livestock and zoo animals)]
-## 7:  equestrian (10)                               [horses]
-## 8:  people (12)**                                 [megacluster, people]
-## 9:  pets (13)                                     [dogs and cats]
-## 10: transportation (20, 24)                       [cars, trucks, buses, trains, bicycles, aircraft]
+## 1:  arts (7,19)                         [tech, music, photography]
+## 2:  sports (12,16,21,23)                [team sports, boxing, shooting]
+## 3:  scenery (10)**                      [mixture of natural and cultural landscape features]
+## 4:  food/dining (4,5,6,8,9,25)          [food, dessert, dining, alcohol] 
+## 5:  aquatic recreation (3,11)           [watercrafts, fishing, and watersports]
+## 6:  biota (1,13,14,20,26)               [flora, fauna, and fungi (and some livestock, cat, and zoo animals)]
+## 7:  equestrian (17)                     [horses]
+## 8:  people (2)**                        [people]
+## 9:  dogs (24)                           [dogs]
+## 10: transport (18,22)                   [cars, trucks, buses, trains, bicycles, aircraft]
+## 11: structures (15)                     [houses and other human structures]
 
 cw.comm <- cw.comm %>%
-  mutate(theme = case_when(cluster %in% c(1,16,27) ~ "arts",
-                           cluster %in% c(18,21,23,26,28,29) ~ "sports",
-                           cluster == 2 ~ "scenery",
-                           cluster %in% c(3,6,8,14,15,22) ~ "food",
-                           cluster %in% c(4,5) ~ "aquatics",
-                           cluster %in% c(9,11,17,19,25) ~ "natural life",
-                           cluster == 10 ~ "equestrian",
-                           cluster == 12 ~ "people",
-                           cluster == 13 ~ "dogs/cats",
-                           cluster %in% c(20,24) ~ "transportation"))
+  mutate(theme = case_when(cluster %in% c(7,19) ~ "arts",
+                           cluster %in% c(12,16,21,23) ~ "sports",
+                           cluster == 10 ~ "scenery",
+                           cluster %in% c(4,5,6,8,9,25) ~ "food/dining",
+                           cluster %in% c(3,11) ~ "aquatics",
+                           cluster %in% c(1,13,14,20,26) ~ "biota",
+                           cluster == 17 ~ "equestrian",
+                           cluster == 2 ~ "people",
+                           cluster == 24 ~ "dogs",
+                           cluster %in% c(18,22) ~ "transport",
+                           cluster == 15 ~ "structures"))
 
+## create table for referencing top tags in each cluster
+cw.comm.table <- cw.comm %>%
+  group_by(theme) %>%
+  arrange(desc(eigen_centrality), .by_group = TRUE) %>%
+  ungroup()
+
+write.csv(cw.comm.table, "data/rural_tag_clusters_agg.csv", 
+          na = "", row.names = FALSE)
+
+cw.comm.stats <- cw.comm %>%
+  group_by(theme) %>%
+  arrange(desc(eigen_centrality), .by_group = TRUE) %>%
+  summarize(top10tags = c(paste0(tag[1:10], sep = ", ", collapse = "")),
+            n_tags = n()) %>%
+  ungroup() %>%
+  arrange(theme)
+
+write.csv(cw.comm.stats, "data/rural_tag_clusters_agg_sumstats.csv", 
+          na = "", row.names = FALSE)
 
 ## assign themes to photos based on tags, randomly split ties
 assign.theme <- function(photos, clusters) {
@@ -440,6 +610,63 @@ rural.image.trends <-
   rural_photos_clustered %>%
   mutate(year = year(date)) %>% 
   filter(year >= 2012 & year <= 2017) %>%
+  group_by(year, STUSPS) %>%
+  summarize(count = n()) %>%
+  ungroup() %>%
+  dcast(year ~ STUSPS) %>%
+  adorn_totals("row") %>%
+  adorn_totals("col")
+
+public.image.trends <- 
+  rural_photos_clustered %>%
+  mutate(year = year(date),
+         public = ifelse(id %in% flickr_public$id, "public", "private")) %>% 
+  filter(year >= 2012 & year <= 2017 & public == "public") %>%
+  group_by(year, STUSPS) %>%
+  summarize(count = n()) %>%
+  ungroup() %>%
+  dcast(year ~ STUSPS) %>%
+  adorn_totals("row") %>%
+  adorn_totals("col")
+
+all.image.trends <- data.frame(
+  Year = c("2012", "2013", "2014", "2015", "2016", "2017", "Total"),
+  NY = paste0(rural.image.trends$NY, " (",
+              public.image.trends$NY, ")"),
+  VT = paste0(rural.image.trends$VT, " (",
+              public.image.trends$VT, ")"),
+  NH = paste0(rural.image.trends$NH, " (",
+              public.image.trends$NH, ")"),
+  ME = paste0(rural.image.trends$ME, " (",
+              public.image.trends$ME, ")"),
+  Total = paste0(rural.image.trends$Total, " (",
+              public.image.trends$Total, ")"),
+)
+
+write.csv(rural.image.trends, "data/rural_images_by_year.csv", 
+          row.names = FALSE)
+
+rural.image.CES.trends <- 
+  rural_photos_clustered %>%
+  mutate(year = year(date)) %>% 
+  filter(year >= 2012 & year <= 2017 &
+         theme %in% c("scenery", "aquatics", "biota")) %>%
+  group_by(year, public, STUSPS) %>%
+  summarize(count = n()) %>%
+  ungroup() %>%
+  dcast(year ~ STUSPS) %>%
+  adorn_totals("row") %>%
+  adorn_totals("col")
+
+rural.image.CES.trends
+write.csv(public.image.theme.trends, "data/rural_CES_images_by_year.csv", 
+          row.names = FALSE)
+
+public.image.CES.trends <- 
+  public_photos_clustered %>%
+  mutate(year = year(date)) %>% 
+  filter(year >= 2012 & year <= 2017 &
+           theme %in% c("scenery", "aquatics", "biota")) %>%
   group_by(year,  STUSPS) %>%
   summarize(count = n()) %>%
   ungroup() %>%
@@ -447,10 +674,11 @@ rural.image.trends <-
   adorn_totals("row") %>%
   adorn_totals("col")
 
-rural.image.trends
-write.csv(rural.image.trends, "rural_images_by_year.csv", row.names = FALSE)
+rural.image.CES.trends
+write.csv(public.image.theme.trends, "data/rural_CES_images_by_year.csv", 
+          row.names = FALSE)
 
-# quick bar plot of cluster composition (mirror)
+# quick bar plot of cluster composition
 rural.themes <-
   rural_photos_clustered %>%
   mutate(public = ifelse(id %in% flickr_public$id, "public", "private")) %>%
@@ -478,16 +706,16 @@ total.themes
 write.csv(rural.themes, "data/public_private_props.csv", row.names = FALSE)
 write.csv(total.themes, "data/rural_props.csv", row.names = FALSE)
 
-# update this to mirror each other on the y axis, ranked by rural proportions
-# show the rural proportions on each size as outlines
 private.themes.plot <- 
   rural.themes %>%
   filter(public == "private") %>%
   mutate(theme = factor(theme, levels = rev(total.themes$theme))) %>%
   ggplot(aes(x = theme, y = prop)) +
   scale_y_reverse(limits=c(1,0)) +
-  geom_col(fill = "grey", col = "grey") +
-  geom_col(data = total.themes, col = "black", fill = "black", width = 0.3) +
+  geom_col(data = total.themes, 
+           aes(x = factor(theme, levels = rev(theme)),
+               y = prop), col = "grey", fill = "grey") +
+  geom_col(fill = "black", col = "black", width = 0.3) +
   coord_flip() +
   theme_bw() + mythemes +
   labs(title = "Private", x = NULL, y = "Proportion of images") +
@@ -498,7 +726,7 @@ theme.cats.plot <-
   ggplot(total.themes, aes(x = theme, y = prop)) +
   geom_text(inherit.aes = FALSE, data = total.themes, 
             aes(x = factor(theme, levels = rev(theme)), 
-                y = rep(0.5, 10), label = theme), size = 5) +
+                y = rep(0.5, nrow(total.themes)), label = theme), size = 5) +
   ylim(c(0,1)) +
   coord_flip() +
   theme_bw() + 
@@ -512,8 +740,10 @@ public.themes.plot <-
   mutate(theme = factor(theme, levels = rev(total.themes$theme))) %>%
   ggplot(aes(x = theme, y = prop)) +
   ylim(c(0,1)) +
-  geom_col(fill = "grey", col = "grey") +
-  geom_col(data = total.themes, col = "black", fill = "black", width = 0.3) +
+  geom_col(data = total.themes, 
+           aes(x = factor(theme, levels = rev(theme)),
+               y = prop), col = "grey", fill = "grey") +
+  geom_col(fill = "black", col = "black", width = 0.3) +
   coord_flip() +
   theme_bw() + mythemes +
   labs(title = "Public", x = NULL, y = "Proportion of images") +
