@@ -171,6 +171,7 @@ flickr.mod.fun <- function(data) {
   boruta.results <- list()
   ## make empty list for partial dependence predictions
   pdp.data <- list()
+  pdp.ice.plots <- list()
   data.IDs <- data %>% mutate(uniqueID = 1:nrow(data))
   for(region in c("NFR", "NY", "VT", "NH", "ME")) {
     if(region != "NFR") {
@@ -371,13 +372,22 @@ flickr.mod.fun <- function(data) {
     # save model for later prediction maps
     models[[region]] <- rf.mod.pred
     
-    # get PDP curves
+    # get PDP curves (which.class = 2 gets the probability of visitation)
     pred.vars <- colnames(train)[1:9]
     for(variable in pred.vars) {
+      # ICE + PDP plots
+      pdp.ice.plots[[region]][[variable]] <-
+        rf.mod.pred %>%
+        pdp::partial(pred.var = variable, rug = TRUE, grid.resolution = 100, 
+                     prob = TRUE, which.class = 2, ice = TRUE, alpha = 0.1,
+                     plot = TRUE, train = train[sample(nrow(train), 500),],
+                     plot.engine = "ggplot2")
+      # PDP prediction data frame
       pdp.data[[region]][[variable]] <- 
         rf.mod.pred %>% 
         pdp::partial(pred.var = variable, rug = TRUE, grid.resolution = 100, 
-                prob = TRUE, train = train[sample(nrow(train), 500),]) %>%
+                prob = TRUE, which.class = 2, 
+                train = train[sample(nrow(train), 500),]) %>%
         as_tibble() %>%
         mutate(region = region)
     }
@@ -423,29 +433,57 @@ flickr.mod.fun <- function(data) {
   # make PDPs for each x variable
   pdp.var.plots <- list()
   for(variable in pred.vars) {
-    if(is.factor(as.data.frame(pdp.data.merge[[variable]])[,variable])) {
-      pdp.var.plots[[variable]] <- 
-        pdp.data.merge[[variable]] %>%
-        ggplot(aes_string(x = variable, 
-                          y = "yhat")) + 
-        geom_point(aes(color = Region)) + ylim(0,0.8) +
-        theme_light() + 
+    # include ifelse to make custom axis limits for rural and public data
+    if(nrow(data) > 100000) {
+      if(is.factor(as.data.frame(pdp.data.merge[[variable]])[,variable])) {
+        pdp.var.plots[[variable]] <- 
+          pdp.data.merge[[variable]] %>%
+          ggplot(aes_string(x = variable, 
+                            y = "yhat")) + 
+          geom_point(aes(color = Region)) + ylim(0.4,1) +
+          theme_light() + 
+          scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
+          labs(x = xvars[variable], y = NULL) +
+          theme(legend.position = "none", 
+                plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
+      } else {
+        pdp.var.plots[[variable]] <- 
+          pdp.data.merge[[variable]] %>%
+          ggplot(aes_string(x = variable, 
+                            y = "yhat")) + 
+          geom_line(aes(color = Region)) + 
+          geom_smooth(aes(color = region), se = FALSE) + ylim(0.4,1) +
+          theme_light() + 
         scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
         labs(x = xvars[variable], y = NULL) +
         theme(legend.position = "none", 
               plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
+      }
     } else {
-      pdp.var.plots[[variable]] <- 
-        pdp.data.merge[[variable]] %>%
-        ggplot(aes_string(x = variable, 
-                          y = "yhat")) + 
-        geom_line(aes(color = Region)) + 
-        geom_smooth(aes(color = region), se = FALSE) + ylim(0,0.8) +
-        theme_light() + 
-        scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
-        labs(x = xvars[variable], y = NULL) +
-        theme(legend.position = "none", 
-              plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
+      if(is.factor(as.data.frame(pdp.data.merge[[variable]])[,variable])) {
+        pdp.var.plots[[variable]] <- 
+          pdp.data.merge[[variable]] %>%
+          ggplot(aes_string(x = variable, 
+                            y = "yhat")) + 
+          geom_point(aes(color = Region)) + ylim(0.25,1) +
+          theme_light() + 
+          scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
+          labs(x = xvars[variable], y = NULL) +
+          theme(legend.position = "none", 
+                plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
+      } else {
+        pdp.var.plots[[variable]] <- 
+          pdp.data.merge[[variable]] %>%
+          ggplot(aes_string(x = variable, 
+                            y = "yhat")) + 
+          geom_line(aes(color = Region)) + 
+          geom_smooth(aes(color = region), se = FALSE) + ylim(0.25,1) +
+          theme_light() + 
+          scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
+          labs(x = xvars[variable], y = NULL) +
+          theme(legend.position = "none", 
+                plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
+      }
     }
   }
   pdp.out <- 
@@ -466,21 +504,22 @@ flickr.mod.fun <- function(data) {
                                          axis.text.y = element_blank()),
               nrow = 3, ncol = 3, align = "h",
               labels = c("A", "B", "C", "D", "E", "F", "G", "H", "I"),
-              label.x = rep(c(0.12, 0.05, 0.05),3), label.y = 0.05, 
+              label.x = rep(c(0.12, 0.05, 0.05),3), label.y = 0.95, 
               font.label = list(size = 12), common.legend = TRUE, legend = "bottom")
   pdp.out <- annotate_figure(pdp.out,
                              left = text_grob(
                                "Probability of nature-based engagement", 
                                rot = 90))
-  return(list(results = list(models = models,
-                             results = diagnostics, 
+  return(list(models = models,
+              results = list(results = diagnostics, 
                              boruta = boruta.df),
               plots = list(boruta = boruta.plot, 
+                           ice = pdp.ice.plots,
                            pdp = pdp.out)))
 }
 
-rural.model.results <- flickr.mod.fun(data = rural_data); beep(3)
-public.model.results <- flickr.mod.fun(data = public_data); beep(3)
+rural.model.results <- flickr.mod.fun(data = rural_data)
+public.model.results <- flickr.mod.fun(data = public_data)
 
 ###############################################################################
 # Model visualizations and predictions
@@ -588,7 +627,8 @@ importance.plot <-
   labs(y = "Relative importance", x = "Variable") +
   facet_wrap(~ Access) +
   theme_bw() + mythemes + theme(strip.background = element_blank(),
-                                strip.text = element_text(hjust = 0))
+                                strip.text = element_text(hjust = 0),
+                                panel.spacing = unit(2, "lines"))
 
 importance.plot
 ggsave("figures/rf_importance.png", width = 10, height = 5, dpi = 600)
@@ -604,27 +644,90 @@ ggsave("figures/pdp_public.png", width = 7, height = 7, dpi = 600)
 
 # plot suitability surfaces for different spatial extents 
 ## load grid
-NFR_grid <- read.csv("data/GIS/baselayers/NFR_grid_covariates.csv")
-## adjust NLCD levels to match the raster data in the models
-NFR_grid <- mutate(NFR_grid, 
-                   nlcd = case_when(nlcd == 11 | nlcd == 12 ~ 1,
-                                    nlcd == 21 | nlcd == 24 ~ 2,
-                                    nlcd == 31 ~ 3,
-                                    nlcd == 41 | nlcd == 43 ~ 4,
-                                    nlcd == 51 | nlcd == 52 ~ 5,
-                                    nlcd == 71 | nlcd == 74 ~ 6,
-                                    nlcd == 81 | nlcd == 82 ~ 7,
-                                    nlcd == 90 | nlcd == 95 ~ 8))
+NFR_grid <- read.csv("data/GIS/baselayers/NFR_grid_covariates_spatial_scales.csv")
+urban_cells <- NFR_grid[NFR_grid$urban != "",]
+public_cells <- NFR_grid[!is.na(NFR_grid$public_land),]
 
-rural_pred_grid <- filter(NFR_grid, !is.na(urban)) %>%
-  dplyr::select(elev, nlcd, roads, rough, shores, 
+## adjust NLCD levels to match the raster data in the models
+NFR_grid_full <- mutate(NFR_grid, 
+                        nlcd = case_when(nlcd >= 11 & nlcd <= 12 ~ 1,
+                                         nlcd >= 21 & nlcd <= 24 ~ 2,
+                                         nlcd == 31 ~ 3,
+                                         nlcd >= 41 & nlcd <= 43 ~ 4,
+                                         nlcd >= 51 & nlcd <= 52 ~ 5,
+                                         nlcd >= 71 & nlcd <= 74 ~ 6,
+                                         nlcd >= 81 & nlcd <= 82 ~ 7,
+                                         nlcd >= 90 & nlcd <= 95 ~ 8),
+                        nlcd = as.factor(nlcd),
+                        rough = (rough - cellStats(rastlist$rough, "mean"))/
+                          cellStats(rastlist$rough, "sd")) %>%
+  filter(urban == "" & !is.na(elev) & !is.na(nlcd) & !is.na(roads) & 
+           !is.na(rough) & !is.na(shore) & !is.na(slope) & !is.na(urblarge) &
+           !is.na(urbmed) & !is.na(urbsmall))
+
+NFR_pred_grid <- NFR_grid_full %>%
+  dplyr::select(elev, nlcd, roads, rough, shores = shore, 
                 slope, urblarge, urbmed, urbsmall)
 
 NFR_rural_pred <- predict(rural.model.results$models$NFR, 
-                          data = rural_pred_grid)
+                          data = NFR_pred_grid)
 
+NFR_rural_pred_df <- as.data.frame(NFR_rural_pred$predictions)
+NFR_rural_pred_df <- cbind(NFR_rural_pred_df, NFR_grid_full) %>%
+  mutate(Lat = (EXT_MIN_Y + EXT_MAX_Y)/2,
+         Lon = (EXT_MIN_X + EXT_MAX_X)/2)
 
+# project state shapefile and add to plot
+states.proj <- st_read("data/GIS/states_NFR_clipped_UTM.shp") 
 
-## make predictions from rural models
+## plot predictions from rural model
+library(scico)
+rur.pred.map <- 
+  ggplot(NFR_rural_pred_df, aes(x = Lon, y = Lat, fill = `1`)) +
+  geom_tile() +
+  geom_tile(data = urban_cells, inherit.aes = FALSE, 
+            aes(x = (EXT_MIN_X + EXT_MAX_X)/2,
+                y = (EXT_MIN_Y + EXT_MAX_Y)/2),
+            fill = "firebrick") +
+  geom_sf(data = states.proj, inherit.aes = FALSE, 
+          fill = "transparent", color = "black") +
+  scale_fill_scico(palette = "nuuk") +
+  labs(x = "", y = "Latitude", fill = "CES suitability") +
+  theme_minimal()
 
+rur.pred.map
+
+NFR_public_pred <- predict(public.model.results$models$NFR, 
+                           data = NFR_pred_grid)
+
+NFR_public_pred_df <- as.data.frame(NFR_public_pred$predictions)
+NFR_public_pred_df <- cbind(NFR_public_pred_df, NFR_grid_full) %>%
+  mutate(Lat = (EXT_MIN_Y + EXT_MAX_Y)/2,
+         Lon = (EXT_MIN_X + EXT_MAX_X)/2)
+
+## plot predictions from public model (just show public lands)
+pub.pred.map <- 
+  ggplot(filter(NFR_public_pred_df, OBJECTID %in% public_cells$OBJECTID), 
+         aes(x = Lon, y = Lat, fill = `1`)) +
+  geom_tile() +
+  geom_tile(data = urban_cells, inherit.aes = FALSE, 
+            aes(x = (EXT_MIN_X + EXT_MAX_X)/2,
+                y = (EXT_MIN_Y + EXT_MAX_Y)/2),
+            fill = "firebrick") +
+  geom_tile(data = filter(NFR_public_pred_df,OBJECTID %notin% public_cells$OBJECTID),
+            inherit.aes = FALSE, aes(x = Lon, y = Lat, fill = NULL), fill = "grey") +
+  geom_sf(data = states.proj, inherit.aes = FALSE, 
+          fill = "transparent", color = "black") +
+  labs(x = "Longitude", y = "Latitude", fill = "CES suitability") +
+  scale_fill_scico(palette = "nuuk") +
+  theme_minimal()
+
+ggarrange(rur.pred.map, pub.pred.map,
+          nrow = 2, labels = c("A", "B"),
+          common.legend = T, legend = "right")
+
+ggsave("figures/CES_suitability_maps.png", width = 6.5, height = 8, dpi = 600)
+
+# R version and package information
 sessionInfo()
+

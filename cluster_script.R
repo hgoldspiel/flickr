@@ -23,6 +23,7 @@ library(vegan)
 library(recluster)
 library(pvclust)
 library(cluster)
+library(ggpubr)
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # PREPARE IMAGE DATA FOR CLUSTER ANALYSIS ------------------------------------
@@ -91,11 +92,11 @@ flickr_public_tidy <- flickr_public %>%
   distinct(id, .keep_all = TRUE)
 
 dim(flickr_rural_tidy)
-# [1] 148953    29
+# [1] 148952    29
 dim(flickr_private_tidy)
-# [1] 93472    29
+# [1] 93680    29
 dim(flickr_public_tidy)
-# [1] 58817    25
+# [1] 58817    26
 
 # visualize photography over months and time of day
 ## hourly image trends
@@ -207,6 +208,18 @@ flickr_public_tidy_tagged <- flickr_public_tidy %>%
            tags7 %notin% " " & tags8 %notin% " " & tags9 %notin% " " &
            tags10 %notin% " ")
 
+# number of rural photos with fewer than 10 tags
+nrow(flickr_rural_tidy)-nrow(flickr_rural_tidy_tagged)
+# [1] 27653
+
+# number of rural photos without any tags
+flickr_rural_tidy %>%
+  filter(tags1 %in% " " & tags2 %in% " " & tags3 %in% " " &
+           tags4 %in% " " & tags5 %in% " " & tags6 %in% " " &
+           tags7 %in% " " & tags8 %in% " " & tags9 %in% " " &
+           tags10 %in% " ") %>%
+  nrow()
+
 # rank tags by percentile, select tags past certain threshold for clustering
 rural_tidy_tags <- 
   list(flickr_rural_tidy_tagged$tags1, flickr_rural_tidy_tagged$tags2, 
@@ -314,7 +327,7 @@ rare_tags <- as.character(rural_tag_freq$tag[rural_tag_freq$freq < 5])
 ## (4) use those MC simulated modularities to pick optimal number of clusters (K);
 ## (5) run cluster analysis on full dataset of tags, using K clusters
 
-## (1) create original tag matrix
+## (1) create tag matrix
 rural_network_in <- 
   flickr_rural_tidy %>%
   dplyr::select(id, tags1, tags2, tags3, tags4, tags5, 
@@ -430,7 +443,7 @@ ggplot(rural_mcmc_wt$tune_grid,
   theme_bw() + mythemes +
   labs(x = "clusters (k)", y = "steps (n)", fill = "modularity (Q)")
 
-ggsave("figures/modularity_tuning_grid.png")
+ggsave("figures/modularity_tuning_grid.png", width = 10, height = 5, dpi = 600)
 
 # modularity scores per cluster sizes for different steps
 ggplot(rural_mcmc_wt$tune_grid, aes(x = cluster, y = mod)) +
@@ -606,6 +619,8 @@ rural_photos_clustered <- assign.theme(photos = flickr_rural_tidy,
 
 # summarize images by theme and region over year
 library(janitor)
+
+# total rural images per year
 rural.image.trends <- 
   rural_photos_clustered %>%
   mutate(year = year(date)) %>% 
@@ -617,6 +632,7 @@ rural.image.trends <-
   adorn_totals("row") %>%
   adorn_totals("col")
 
+# total rural images in public areas per year
 public.image.trends <- 
   rural_photos_clustered %>%
   mutate(year = year(date),
@@ -629,6 +645,20 @@ public.image.trends <-
   adorn_totals("row") %>%
   adorn_totals("col")
 
+# total rural images in private areas per year
+private.image.trends <- 
+  rural_photos_clustered %>%
+  mutate(year = year(date),
+         public = ifelse(id %in% flickr_public$id, "public", "private")) %>% 
+  filter(year >= 2012 & year <= 2017 & public == "private") %>%
+  group_by(year, STUSPS) %>%
+  summarize(count = n()) %>%
+  ungroup() %>%
+  dcast(year ~ STUSPS) %>%
+  adorn_totals("row") %>%
+  adorn_totals("col")
+
+# combined table of rural and public images
 all.image.trends <- data.frame(
   Year = c("2012", "2013", "2014", "2015", "2016", "2017", "Total"),
   NY = paste0(rural.image.trends$NY, " (",
@@ -640,46 +670,21 @@ all.image.trends <- data.frame(
   ME = paste0(rural.image.trends$ME, " (",
               public.image.trends$ME, ")"),
   Total = paste0(rural.image.trends$Total, " (",
-              public.image.trends$Total, ")"),
+              public.image.trends$Total, ")")
 )
 
+# save all tables as CSV files
 write.csv(rural.image.trends, "data/rural_images_by_year.csv", 
           row.names = FALSE)
-
-rural.image.CES.trends <- 
-  rural_photos_clustered %>%
-  mutate(year = year(date)) %>% 
-  filter(year >= 2012 & year <= 2017 &
-         theme %in% c("scenery", "aquatics", "biota")) %>%
-  group_by(year, public, STUSPS) %>%
-  summarize(count = n()) %>%
-  ungroup() %>%
-  dcast(year ~ STUSPS) %>%
-  adorn_totals("row") %>%
-  adorn_totals("col")
-
-rural.image.CES.trends
-write.csv(public.image.theme.trends, "data/rural_CES_images_by_year.csv", 
+write.csv(private.image.trends, "data/private_images_by_year.csv", 
           row.names = FALSE)
-
-public.image.CES.trends <- 
-  public_photos_clustered %>%
-  mutate(year = year(date)) %>% 
-  filter(year >= 2012 & year <= 2017 &
-           theme %in% c("scenery", "aquatics", "biota")) %>%
-  group_by(year,  STUSPS) %>%
-  summarize(count = n()) %>%
-  ungroup() %>%
-  dcast(year ~ STUSPS) %>%
-  adorn_totals("row") %>%
-  adorn_totals("col")
-
-rural.image.CES.trends
-write.csv(public.image.theme.trends, "data/rural_CES_images_by_year.csv", 
+write.csv(public.image.trends, "data/public_images_by_year.csv", 
+          row.names = FALSE)
+write.csv(all.image.trends, "data/rural_public_images_by_year.csv", 
           row.names = FALSE)
 
 # quick bar plot of cluster composition
-rural.themes <-
+public.private.themes <-
   rural_photos_clustered %>%
   mutate(public = ifelse(id %in% flickr_public$id, "public", "private")) %>%
   group_by(public, theme) %>%
@@ -690,9 +695,9 @@ rural.themes <-
   mutate(prop = round(count / sum(count), 3)) %>%
   ungroup()
 
-rural.themes
+public.private.themes
 
-total.themes <- 
+total.rural.themes <- 
   rural_photos_clustered %>%
   group_by(theme) %>%
   summarize(count = n()) %>%
@@ -701,13 +706,27 @@ total.themes <-
   arrange(desc(count)) %>%
   mutate(prop = round(count / sum(count), 3))
 
-total.themes
+total.rural.themes
 
-write.csv(rural.themes, "data/public_private_props.csv", row.names = FALSE)
-write.csv(total.themes, "data/rural_props.csv", row.names = FALSE)
+total.rural.themes.by.state <- rural_photos_clustered %>%
+  group_by(theme, STUSPS) %>%
+  summarize(count = n()) %>%
+  na.omit() %>%
+  ungroup() %>%
+  group_by(STUSPS) %>%
+  arrange(desc(count)) %>%
+  mutate(prop = round(count / sum(count), 3)) %>%
+  ungroup()
+
+write.csv(public.private.themes, "data/public_private_theme_props.csv", 
+          row.names = FALSE)
+write.csv(total.rural.themes, "data/rural_theme_props.csv", 
+          row.names = FALSE)
+write.csv(total.rural.themes.by.state, "data/rural_state_theme_props.csv", 
+          row.names = FALSE)
 
 private.themes.plot <- 
-  rural.themes %>%
+  public.private.themes %>%
   filter(public == "private") %>%
   mutate(theme = factor(theme, levels = rev(total.themes$theme))) %>%
   ggplot(aes(x = theme, y = prop)) +
@@ -723,7 +742,7 @@ private.themes.plot <-
         plot.title = element_text(hjust = 0.5))
 
 theme.cats.plot <- 
-  ggplot(total.themes, aes(x = theme, y = prop)) +
+  ggplot(total.rural.themes, aes(x = theme, y = prop)) +
   geom_text(inherit.aes = FALSE, data = total.themes, 
             aes(x = factor(theme, levels = rev(theme)), 
                 y = rep(0.5, nrow(total.themes)), label = theme), size = 5) +
@@ -735,7 +754,7 @@ theme.cats.plot <-
   labs(title = " ", x = NULL, y = " ")
   
 public.themes.plot <- 
-  rural.themes %>%
+  public.priavte.themes %>%
   filter(public == "public") %>%
   mutate(theme = factor(theme, levels = rev(total.themes$theme))) %>%
   ggplot(aes(x = theme, y = prop)) +
