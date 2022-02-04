@@ -16,6 +16,7 @@ Mode <- function(x) {
 }
 
 ## percentile rank
+library(stringr)
 percentile_rank <- function(x) 
   ifelse(is.na(x),NA,rank(x)/length(x[is.na(x) == FALSE]))
 

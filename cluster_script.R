@@ -3,6 +3,7 @@
 # Harrison B Goldspiel | harrison.goldspiel@maine.edu
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+# load custom R functions and settings
 source("custom_functions_settings.R")
 
 # Image content clustering summary:
@@ -25,9 +26,8 @@ library(pvclust)
 library(cluster)
 library(ggpubr)
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# PREPARE IMAGE DATA FOR CLUSTER ANALYSIS ------------------------------------
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Data preparation --------------------------------------------------------
 
 # load raw Flickr data
 flickr_all <- read.csv("data/flickr_NFR_all.csv") 
@@ -70,6 +70,7 @@ write.csv(tag_cap_samp, "data/tag_cap_sample.csv", na = "", row.names = FALSE)
 flickr_rural_tidy <- flickr_rural %>%
   mutate(datetime = mdy_hm(datetaken),
          date = date(datetime),
+         year = year(date),
          month = month(date),
          hour = hour(datetime),
          id = as.factor(id)) %>%
@@ -78,6 +79,7 @@ flickr_rural_tidy <- flickr_rural %>%
 flickr_private_tidy <- flickr_private %>%
   mutate(datetime = mdy_hm(datetaken),
          date = date(datetime),
+         year = year(date),
          month = month(date),
          hour = hour(datetime),
          id = as.factor(id)) %>%
@@ -86,6 +88,7 @@ flickr_private_tidy <- flickr_private %>%
 flickr_public_tidy <- flickr_public %>%
   mutate(datetime = ymd_hms(datetaken),
          date = date(datetime),
+         year = year(date),
          month = month(date),
          hour = hour(datetime),
          id = as.factor(id)) %>%
@@ -97,6 +100,10 @@ dim(flickr_private_tidy)
 # [1] 93680    29
 dim(flickr_public_tidy)
 # [1] 58817    26
+
+
+
+# Spatiotemporal trends  --------------------------------------------------
 
 # visualize photography over months and time of day
 ## hourly image trends
@@ -121,25 +128,25 @@ states.private.hourly <- hourly.trends.fun(flickr_private_tidy)
 states.hourly <- hourly.trends.fun(flickr_rural_tidy)
 
 # bar plots separated by state
-colors <- c("Rural" = "grey", 
+colors <- c("All rural" = "grey", 
             "Public" = "forestgreen", 
             "Private" = "black")
 
 hourly.trends.plot <-
   ggplot(states.public.hourly, aes(x = Hour, y = Freq)) + 
   geom_col(data = states.hourly, inherit.aes = FALSE,
-           aes(x = Hour, y = Freq, fill = "Rural")) +
+           aes(x = Hour, y = Freq, fill = "All rural")) +
   geom_col(data = states.hourly, inherit.aes = FALSE,
-           aes(x = Hour, y = -Freq, fill = "Rural")) +
+           aes(x = Hour, y = -Freq, fill = "All rural")) +
   geom_col(aes(fill = "Public"), width = 0.5) + 
   geom_col(data = states.private.hourly, width = 0.5,
            inherit.aes = FALSE, aes(x = Hour, y = -Freq, fill = "Private")) +
   facet_grid(~State) +
   theme_bw() + mythemes + labs(x = NULL, y = NULL, fill = NULL) +
   scale_fill_manual(values = colors) +
-  scale_x_continuous(breaks = 0:24, labels = c("24/0", as.character(1:24)), 
+  scale_x_continuous(breaks = 0:24, labels = c("0", as.character(1:24)), 
                      expand = c(.002,0)) +
-  coord_polar(start = -.13) +
+  coord_polar(start = -.13, clip = "off") +
   theme(legend.position = "bottom", legend.text = element_text(size = 12),
         panel.border = element_blank(), strip.background = element_blank(), 
         axis.text.x = element_text(size = 11), axis.text.y = element_blank(), 
@@ -168,9 +175,9 @@ states.monthly <- monthly.trends.fun(flickr_rural_tidy)
 monthly.trends.plot <- 
   ggplot(states.public.monthly, aes(x = factor(Month), y = Freq)) + 
   geom_col(data = states.monthly, inherit.aes = FALSE,
-           aes(x = factor(Month), y = Freq, fill = "Rural")) +
+           aes(x = factor(Month), y = Freq, fill = "All rural")) +
   geom_col(data = states.monthly, inherit.aes = FALSE,
-           aes(x = factor(Month), y = -Freq, fill = "Rural")) +
+           aes(x = factor(Month), y = -Freq, fill = "All rural")) +
   geom_col(aes(fill = "Public"), width = 0.5) + 
   geom_col(data = states.private.monthly, width = 0.5,
            inherit.aes = FALSE, aes(x = Month, y = -Freq, fill = "Private")) +
@@ -178,17 +185,67 @@ monthly.trends.plot <-
   scale_fill_manual(values = colors) +
   theme_bw() + mythemes + labs(x = NULL, y = NULL, fill = NULL) +
   scale_x_discrete(breaks = c(1:12), labels = month.abb) + 
-  coord_polar(start = 6) +
+  coord_polar(start = 6, clip = "off") +
   theme(legend.position = "bottom", legend.text = element_text(size = 12),
-        panel.border = element_blank(), strip.background = element_blank(), 
-        strip.text.x = element_blank(), axis.text.x = element_text(size = 11), 
-        axis.text.y = element_blank(), axis.ticks.y = element_blank())
+        panel.border = element_blank(), panel.spacing = unit(1, "lines"),
+        strip.background = element_blank(), strip.text.x = element_blank(), 
+        axis.text.x = element_text(size = 11), axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank())
 
-ggarrange(hourly.trends.plot, monthly.trends.plot, 
+
+## annual image trends
+yearly.trends.fun <- function(data) {
+  states.df.list <- list()
+  for(state in c("NY", "VT", "NH", "ME")) {
+    states.df.list[[state]] <- data.frame(table(data$year[data$STUSPS == state & 
+                                                            data$year <= 2017 & 
+                                                            data$year >= 2012]))
+    colnames(states.df.list[[state]]) <- c("Year", "Freq")
+  }
+  states.yearly <- rbind(states.df.list[["NY"]], states.df.list[["VT"]],
+                          states.df.list[["NH"]], states.df.list[["ME"]])
+  states.yearly$State <- c(rep("NY", 6), rep("VT", 6), 
+                            rep("NH", 6), rep("ME", 6))
+  states.yearly$State = factor(states.yearly$State, 
+                                levels = c("NY", "VT", "NH", "ME"))
+  return(states.yearly)
+}
+states.public.yearly <- yearly.trends.fun(flickr_public_tidy)
+states.private.yearly <- yearly.trends.fun(flickr_private_tidy)
+states.yearly <- yearly.trends.fun(flickr_rural_tidy)
+
+yearly.trends.plot <- 
+  ggplot(states.public.yearly, aes(x = as.numeric(as.character(Year)), y = Freq)) + 
+  geom_point(aes(color = "Public"), size = 2) + 
+  geom_line(aes(color = "Public")) +
+  geom_point(data = states.yearly, inherit.aes = FALSE, size = 2,
+             aes(x = as.numeric(as.character(Year)), y = Freq, color = "All rural")) +
+  geom_line(data = states.yearly, inherit.aes = FALSE,
+             aes(x = as.numeric(as.character(Year)), y = Freq, color = "All rural")) +
+  geom_point(data = states.private.yearly, inherit.aes = FALSE, size = 2,
+             aes(x = as.numeric(as.character(Year)), y = Freq, color = "Private")) +
+  geom_line(data = states.private.yearly, inherit.aes = FALSE,
+            aes(x = as.numeric(as.character(Year)), y = Freq, color = "Private")) +
+  facet_grid(~State) +
+  scale_color_manual(values = colors) +
+  scale_x_continuous(breaks = c(2012, 2014, 2016)) +
+  scale_y_continuous(breaks = c(2500, 5000, 7500, 10000)) +
+  facet_grid(~State) +
+  theme_bw() + mythemes + labs(x = NULL, y = "Images (n)", fill = NULL) +
+  theme(legend.position = "none", legend.text = element_text(size = 12), 
+        strip.background = element_blank(), strip.text.x = element_blank(), 
+        axis.text.x = element_text(size = 11))
+
+
+ggarrange(hourly.trends.plot, monthly.trends.plot, yearly.trends.plot,
           common.legend = TRUE, legend = "bottom",
-          nrow = 2, labels = c("A", "B"), align = "v")
+          nrow = 3, labels = c("A", "B", "C"), align = "v",
+          label.y = c(1,1,1.1))
 
-ggsave("figures/rural_image_trends.png", width = 10, height = 6, dpi = 600)
+ggsave("figures/rural_image_trends.png", width = 8, height = 7, dpi = 600)
+
+
+# Organize image tags -----------------------------------------------------
 
 # rank tags by percentile, select tags past certain threshold for clustering
 # get list of images with all 10 tags
@@ -317,9 +374,8 @@ write.csv(public_tag_freq, "data/public_all_tags.csv")
 # list of uncommon (N < 5 images) tags
 rare_tags <- as.character(rural_tag_freq$tag[rural_tag_freq$freq < 5])
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# RUN MONTE CARLO (MC) CLUSTER ANALYSIS for rural and public land images------
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# MCMC cluster analysis ---------------------------------------------------
 
 ## (1) create raw rural tag matrix
 ## (2) random sample 80% of rural tags over 1000 iterations, without replacement, 
@@ -531,9 +587,8 @@ for (clust in 1:nclust) {
 
 write.csv(tag.ranks, "data/rural_tag_clusters.csv", na = "", row.names = FALSE)
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ASSIGN CLUSTERS TO IMAGES BASED ON TAG CONTENT -----------------------------
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Cluster (i.e., theme) assignment based on tag content --------------------
 
 ## aggregate clusters into core groups
 ## ** indicates a megacluster
@@ -617,6 +672,9 @@ assign.theme <- function(photos, clusters) {
 rural_photos_clustered <- assign.theme(photos = flickr_rural_tidy, 
                                        clusters = cw.comm)
 
+
+# Summary statistics for theme composition --------------------------------
+
 # summarize images by theme and region over year
 library(janitor)
 
@@ -683,7 +741,7 @@ write.csv(public.image.trends, "data/public_images_by_year.csv",
 write.csv(all.image.trends, "data/rural_public_images_by_year.csv", 
           row.names = FALSE)
 
-# quick bar plot of cluster composition
+# quick bar plot of cluster composition in public and private rural areas
 public.private.themes <-
   rural_photos_clustered %>%
   mutate(public = ifelse(id %in% flickr_public$id, "public", "private")) %>%
@@ -718,6 +776,23 @@ total.rural.themes.by.state <- rural_photos_clustered %>%
   mutate(prop = round(count / sum(count), 3)) %>%
   ungroup()
 
+total.rural.themes.by.state %>%
+  mutate(State = factor(STUSPS, levels = c("NY", "VT", "NH", "ME"))) %>%
+  ggplot(aes(x = State, prop)) +
+  geom_col(aes(fill = State)) +
+  labs(x = "State", y = "Proportion of images") +
+  scale_fill_manual(values = col2[2:5]) +
+  facet_wrap(~factor(theme, levels = total.themes$theme)) +
+  theme_bw() + mythemes + theme(legend.position = c(0.9, 0.15),
+                                legend.text = element_text(size = 12),
+                                legend.title = element_text(size = 14),
+                                axis.text.x = element_text(size = 12), 
+                                axis.text.y = element_text(size = 12),
+                                axis.title.x = element_text(size = 14),
+                                axis.title.y = element_text(size = 14))
+
+ggsave("figures/rural_image_themes_states.png", width = 6, height = 6, dpi = 600)
+
 write.csv(public.private.themes, "data/public_private_theme_props.csv", 
           row.names = FALSE)
 write.csv(total.rural.themes, "data/rural_theme_props.csv", 
@@ -725,6 +800,7 @@ write.csv(total.rural.themes, "data/rural_theme_props.csv",
 write.csv(total.rural.themes.by.state, "data/rural_state_theme_props.csv", 
           row.names = FALSE)
 
+# composition of themes in private areas
 private.themes.plot <- 
   public.private.themes %>%
   filter(public == "private") %>%
@@ -741,6 +817,7 @@ private.themes.plot <-
   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
         plot.title = element_text(hjust = 0.5))
 
+# theme rankings (text)
 theme.cats.plot <- 
   ggplot(total.rural.themes, aes(x = theme, y = prop)) +
   geom_text(inherit.aes = FALSE, data = total.themes, 
@@ -752,7 +829,8 @@ theme.cats.plot <-
   theme(line = element_blank(), rect = element_blank(),
         axis.text = element_blank(), axis.ticks = element_blank()) +
   labs(title = " ", x = NULL, y = " ")
-  
+
+# composition of themes in public areas
 public.themes.plot <- 
   public.priavte.themes %>%
   filter(public == "public") %>%
@@ -769,9 +847,11 @@ public.themes.plot <-
   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
         plot.title = element_text(hjust = 0.5))
 
+# pull private/public/theme categories together in one figure
 ggarrange(private.themes.plot, theme.cats.plot, public.themes.plot, 
           nrow = 1, widths = c(1,0.35,1), labels = c("A", "", "B"), align = "hv")
 
 ggsave("figures/rural_image_composition.png", width = 10, height = 5, dpi = 600)
 
+# save local environment to feed into model script
 save.image(file = "data/cluster_analysis_output.RData")

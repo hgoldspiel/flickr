@@ -3,6 +3,7 @@
 # Harrison B Goldspiel | harrison.goldspiel@maine.edu
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+# load image data with assigned themes from cluster analysis
 load("data/cluster_analysis_output.RData")
 
 # Predictive models for NFR Flickr data
@@ -12,9 +13,7 @@ load("data/cluster_analysis_output.RData")
 ## 4. Identify relevant geographic drivers of visitation
 ## 5. Use models to predict CES suitability surfaces for focal areas
 
-###############################################################################
-# data prep
-###############################################################################
+# Data preparation ----------------------------------------------------------
 
 # load packages
 library(beepr)
@@ -79,6 +78,25 @@ rural_images <-
   sf::st_as_sf(rural_photos_coords, 
                coords = c("longitude", "latitude")) %>%
   st_set_crs(4326)
+
+# make empty sq km grid
+NFR.albers <- NFR %>% st_transform(5070)
+NFR.grid = st_make_grid(NFR.albers, c(1000, 1000), 
+                        what = "polygons", square = TRUE) 
+NFR.grid.centroids = 
+
+
+%>% 
+  st_transform(4326) %>%
+  st_sf()
+
+NFR.grid.centroids <- st_cast(plot_locations_df, "POLYGON")
+plot_locations_df
+
+
+NFR.grid.clip <- st_intersection(NFR.grid, NFR)
+
+
 
 # attach extracted raster values to image dataset
 rural_images_geo <- matrix(nrow = nrow(rural_images), 
@@ -148,12 +166,14 @@ public_data <- rural_data %>%
 rural_data <- dplyr::select(rural_data, -id) %>%
   mutate(rough = (rough - cellStats(rastlist$rough, "mean"))/cellStats(rastlist$rough, "sd"))
 
-###############################################################################
-# Random forest model development
-###############################################################################
+
+# Random forest models ----------------------------------------------------
 
 # examine collinearity in variables with VIFs
 corvif(rural_data[,1:9])
+
+# CES themes to subset image data with
+CES.themes <- c("scenery", "biota", "aquatics")
 
 # function for random forest models
 flickr.mod.fun <- function(data) {
@@ -171,17 +191,16 @@ flickr.mod.fun <- function(data) {
   boruta.results <- list()
   ## make empty list for partial dependence predictions
   pdp.data <- list()
+  ## make empty list for ice plots
   pdp.ice.plots <- list()
   data.IDs <- data %>% mutate(uniqueID = 1:nrow(data))
-  for(region in c("NFR", "NY", "VT", "NH", "ME")) {
-    if(region != "NFR") {
-      input_data <- data.IDs[data.IDs$state == region,] 
+  for(location in c("NFR", "NY", "VT", "NH", "ME")) {
+    if(location != "NFR") {
+      input_data <- data.IDs[data.IDs$state == location,] 
     } else {
       input_data <- data.IDs
     }
-    mod_data <- na.omit(input_data[input_data$theme == "scenery" | 
-                                     input_data$theme == "biota" |
-                                     input_data$theme == "aquatics" |
+    mod_data <- na.omit(input_data[input_data$theme %in% CES.themes |
                                      input_data$theme == "all",])
     dt <- sort(sample(nrow(mod_data), round(nrow(mod_data)*0.7)))
     training.IDs <- c(mod_data$uniqueID[dt])
@@ -204,7 +223,8 @@ flickr.mod.fun <- function(data) {
         num.trees       = 500,
         mtry            = hyper_grid$mtry[i],
         sample.fraction = hyper_grid$sample_size[i],
-        seed            = 123
+        seed            = 123,
+        verbose         = FALSE
       )
       # add OOB error to grid
       hyper_grid$OOB_RMSE[i] <- sqrt(model$prediction.error)
@@ -223,118 +243,113 @@ flickr.mod.fun <- function(data) {
       num.trees       = 500,
       mtry            = hyper_grid$mtry[1],
       sample.fraction = hyper_grid$sample_size[1],
-      seed            = 123
+      seed            = 123,
+      verbose         = FALSE
     )
     
     ## cross-validation (within-region, down-scaling, up-scaling, & b/w states)
     for(to in c("NFR", "NY", "VT", "NH", "ME")) {
       # within-region
-      if(to == region) {
+      if(to == location) {
         pred <- predict(rf.mod, data = test)
         diag.obj <- confusionMatrix(pred$predictions, test$pa, positive = "1")
-        diagnostics$accuracy[diagnostics$from == region & 
-                               diagnostics$to == region] <- 
+        diagnostics$accuracy[diagnostics$from == location & 
+                               diagnostics$to == location] <- 
           diag.obj$overall["Accuracy"]
-        diagnostics$accuracy_lwr[diagnostics$from == region & 
-                                   diagnostics$to == region] <- 
+        diagnostics$accuracy_lwr[diagnostics$from == location & 
+                                   diagnostics$to == location] <- 
           diag.obj$overall["AccuracyLower"]
-        diagnostics$accuracy_upr[diagnostics$from == region & 
-                                   diagnostics$to == region] <- 
+        diagnostics$accuracy_upr[diagnostics$from == location & 
+                                   diagnostics$to == location] <- 
           diag.obj$overall["AccuracyUpper"]
-        diagnostics$kappa[diagnostics$from == region & 
-                            diagnostics$to == region] <-  
+        diagnostics$kappa[diagnostics$from == location & 
+                            diagnostics$to == location] <-  
           diag.obj$overall["Kappa"]
-        diagnostics$sensitivity[diagnostics$from == region & 
-                                  diagnostics$to == region] <- 
+        diagnostics$sensitivity[diagnostics$from == location & 
+                                  diagnostics$to == location] <- 
           diag.obj$byClass["Sensitivity"]
-        diagnostics$specificity[diagnostics$from == region & 
-                                  diagnostics$to == region] <- 
+        diagnostics$specificity[diagnostics$from == location & 
+                                  diagnostics$to == location] <- 
           diag.obj$byClass["Specificity"]
-      } else if(region == "NFR" & to != "NFR") {
+      } else if(location == "NFR" & to != "NFR") {
         # scaling model down
         testdat <- na.omit(
           data.IDs[data.IDs$state == to & 
-                     (data.IDs$theme == "scenery" | 
-                        data.IDs$theme == "biota" |
-                        data.IDs$theme == "aquatics" |
+                     (data.IDs$theme %in% CES.themes |
                         data.IDs$theme == "all") &
                      data.IDs$uniqueID != training.IDs, 
                    c(1:9, 11)])
         pred <- predict(rf.mod, data = testdat)
         diag.obj <- confusionMatrix(pred$predictions, testdat$pa, positive = "1")
-        diagnostics$accuracy[diagnostics$from == region & 
+        diagnostics$accuracy[diagnostics$from == location & 
                                diagnostics$to == to] <- 
           diag.obj$overall["Accuracy"]
-        diagnostics$accuracy_lwr[diagnostics$from == region & 
+        diagnostics$accuracy_lwr[diagnostics$from == location & 
                                    diagnostics$to == to] <- 
           diag.obj$overall["AccuracyLower"]
-        diagnostics$accuracy_upr[diagnostics$from == region & 
+        diagnostics$accuracy_upr[diagnostics$from == location & 
                                    diagnostics$to == to] <- 
           diag.obj$overall["AccuracyUpper"]
-        diagnostics$kappa[diagnostics$from == region & 
+        diagnostics$kappa[diagnostics$from == location & 
                             diagnostics$to == to] <-  
           diag.obj$overall["Kappa"]
-        diagnostics$sensitivity[diagnostics$from == region & 
+        diagnostics$sensitivity[diagnostics$from == location & 
                                   diagnostics$to == to] <- 
           diag.obj$byClass["Sensitivity"]
-        diagnostics$specificity[diagnostics$from == region & 
+        diagnostics$specificity[diagnostics$from == location & 
                                   diagnostics$to == to] <- 
           diag.obj$byClass["Specificity"]
-      } else if(region != "NFR" & to == "NFR") {
+      } else if(location != "NFR" & to == "NFR") {
         # scaling model up
         testdat <- na.omit(
-          data.IDs[(data.IDs$theme == "scenery" | 
-                      data.IDs$theme == "biota" |
-                      data.IDs$theme == "aquatics" |
+          data.IDs[(data.IDs$theme %in% CES.themes |
                       data.IDs$theme == "all") &
                      data.IDs$uniqueID != training.IDs, 
                    c(1:9, 11)])
         pred <- predict(rf.mod, data = testdat)
         diag.obj <- confusionMatrix(pred$predictions, testdat$pa, positive = "1")
-        diagnostics$accuracy[diagnostics$from == region & 
+        diagnostics$accuracy[diagnostics$from == location & 
                                diagnostics$to == to] <- 
           diag.obj$overall["Accuracy"]
-        diagnostics$accuracy_lwr[diagnostics$from == region & 
+        diagnostics$accuracy_lwr[diagnostics$from == location & 
                                    diagnostics$to == to] <- 
           diag.obj$overall["AccuracyLower"]
-        diagnostics$accuracy_upr[diagnostics$from == region & 
+        diagnostics$accuracy_upr[diagnostics$from == location & 
                                    diagnostics$to == to] <- 
           diag.obj$overall["AccuracyUpper"]
-        diagnostics$kappa[diagnostics$from == region & 
+        diagnostics$kappa[diagnostics$from == location & 
                             diagnostics$to == to] <-  
           diag.obj$overall["Kappa"]
-        diagnostics$sensitivity[diagnostics$from == region & 
+        diagnostics$sensitivity[diagnostics$from == location & 
                                   diagnostics$to == to] <- 
           diag.obj$byClass["Sensitivity"]
-        diagnostics$specificity[diagnostics$from == region & 
+        diagnostics$specificity[diagnostics$from == location & 
                                   diagnostics$to == to] <- 
           diag.obj$byClass["Specificity"]
       } else {
         # between states
         testdat <- na.omit(
           data[data$state == to & 
-                 (data$theme == "scenery" | 
-                    data$theme == "biota" |
-                    data$theme == "aquatics" |
+                 (data$theme %in% CES.themes |
                     data$theme == "all"), c(1:9, 11)])
         pred <- predict(rf.mod, data = testdat)
         diag.obj <- confusionMatrix(pred$predictions, testdat$pa, positive = "1")
-        diagnostics$accuracy[diagnostics$from == region & 
+        diagnostics$accuracy[diagnostics$from == location & 
                                diagnostics$to == to] <- 
           diag.obj$overall["Accuracy"]
-        diagnostics$accuracy_lwr[diagnostics$from == region & 
+        diagnostics$accuracy_lwr[diagnostics$from == location & 
                                    diagnostics$to == to] <- 
           diag.obj$overall["AccuracyLower"]
-        diagnostics$accuracy_upr[diagnostics$from == region & 
+        diagnostics$accuracy_upr[diagnostics$from == location & 
                                    diagnostics$to == to] <- 
           diag.obj$overall["AccuracyUpper"]
-        diagnostics$kappa[diagnostics$from == region & 
+        diagnostics$kappa[diagnostics$from == location & 
                             diagnostics$to == to] <-  
           diag.obj$overall["Kappa"]
-        diagnostics$sensitivity[diagnostics$from == region & 
+        diagnostics$sensitivity[diagnostics$from == location & 
                                   diagnostics$to == to] <- 
           diag.obj$byClass["Sensitivity"]
-        diagnostics$specificity[diagnostics$from == region & 
+        diagnostics$specificity[diagnostics$from == location & 
                                   diagnostics$to == to] <- 
           diag.obj$byClass["Specificity"]
       }
@@ -346,16 +361,16 @@ flickr.mod.fun <- function(data) {
              ntree = 500, 
              mtry = hyper_grid$mtry[1], 
              sample.fraction = hyper_grid$sample_size[1],
-             maxRuns = 500, doTrace = 2)
+             maxRuns = 500, doTrace = 0)
     
     ## create table of importance statistics
     boruta_df <- attStats(boruta.bank)
     boruta_df$Variable <- rownames(boruta_df)
-    boruta_df$Scale <- region
+    boruta_df$Scale <- location
     boruta_df$rel_imp <- boruta_df$meanImp/max(boruta_df$maxImp)
     
     ## create list to store boruta results for each outcome
-    boruta.results[[region]] <- boruta_df
+    boruta.results[[location]] <- boruta_df
     
     ## E. Plot partial response curves of predictors
     # make rf model with "probability = TRUE" using ranger to get PDPs
@@ -366,32 +381,33 @@ flickr.mod.fun <- function(data) {
       mtry            = hyper_grid$mtry[1],
       sample.fraction = hyper_grid$sample_size[1],
       seed            = 123,
-      probability     = TRUE
+      probability     = TRUE,
+      verbose         = FALSE
     )
     
     # save model for later prediction maps
-    models[[region]] <- rf.mod.pred
+    models[[location]] <- rf.mod.pred
     
     # get PDP curves (which.class = 2 gets the probability of visitation)
     pred.vars <- colnames(train)[1:9]
     for(variable in pred.vars) {
       # ICE + PDP plots
-      pdp.ice.plots[[region]][[variable]] <-
+      pdp.ice.plots[[location]][[variable]] <-
         rf.mod.pred %>%
         pdp::partial(pred.var = variable, rug = TRUE, grid.resolution = 100, 
                      prob = TRUE, which.class = 2, ice = TRUE, alpha = 0.1,
                      plot = TRUE, train = train[sample(nrow(train), 500),],
                      plot.engine = "ggplot2")
       # PDP prediction data frame
-      pdp.data[[region]][[variable]] <- 
+      pdp.data[[location]][[variable]] <- 
         rf.mod.pred %>% 
         pdp::partial(pred.var = variable, rug = TRUE, grid.resolution = 100, 
                 prob = TRUE, which.class = 2, 
                 train = train[sample(nrow(train), 500),]) %>%
         as_tibble() %>%
-        mutate(region = region)
+        mutate(Region = location)
     }
-    print(paste0(region, " done!"))
+    print(paste0(location, " done!"))
   }
   # merge together predictions across regions
   pdp.data.merge <- list()
@@ -402,7 +418,7 @@ flickr.mod.fun <- function(data) {
                                             pdp.data[["NH"]][[variable]],
                                             pdp.data[["ME"]][[variable]])
     pdp.data.merge[[variable]]$Region <- 
-      factor(pdp.data.merge[[variable]]$region, 
+      factor(pdp.data.merge[[variable]]$location, 
              levels = c("NFR", "NY", "VT", "NH", "ME"))
   }
   
@@ -440,9 +456,11 @@ flickr.mod.fun <- function(data) {
           pdp.data.merge[[variable]] %>%
           ggplot(aes_string(x = variable, 
                             y = "yhat")) + 
-          geom_point(aes(color = Region)) + ylim(0.4,1) +
-          theme_light() + 
-          scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
+          geom_point(aes(shape = Region, fill = Region), size = 2) +
+          scale_color_manual(values = c(rep("black", 5))) +
+          scale_fill_manual(values = col2[c(1:5)]) +
+          scale_shape_manual(values = c(21:25)) +
+          theme_light() + ylim(0.4,1) +
           labs(x = xvars[variable], y = NULL) +
           theme(legend.position = "none", 
                 plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
@@ -452,9 +470,9 @@ flickr.mod.fun <- function(data) {
           ggplot(aes_string(x = variable, 
                             y = "yhat")) + 
           geom_line(aes(color = Region)) + 
-          geom_smooth(aes(color = region), se = FALSE) + ylim(0.4,1) +
-          theme_light() + 
-        scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
+          geom_smooth(aes(color = Region), se = FALSE) 
+          theme_light() + ylim(0.4,1) +
+        scale_color_manual(values = col2[c(1:5)]) +
         labs(x = xvars[variable], y = NULL) +
         theme(legend.position = "none", 
               plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
@@ -465,9 +483,11 @@ flickr.mod.fun <- function(data) {
           pdp.data.merge[[variable]] %>%
           ggplot(aes_string(x = variable, 
                             y = "yhat")) + 
-          geom_point(aes(color = Region)) + ylim(0.25,1) +
-          theme_light() + 
-          scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
+          geom_point(aes(shape = Region, fill = Region), size = 2) +
+          scale_color_manual(values = c(rep("black", 5))) +
+          scale_fill_manual(values = col2[c(1:5)]) +
+          scale_shape_manual(values = c(21:25)) +
+          theme_light() + ylim(0.25,1) +
           labs(x = xvars[variable], y = NULL) +
           theme(legend.position = "none", 
                 plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
@@ -477,9 +497,9 @@ flickr.mod.fun <- function(data) {
           ggplot(aes_string(x = variable, 
                             y = "yhat")) + 
           geom_line(aes(color = Region)) + 
-          geom_smooth(aes(color = region), se = FALSE) + ylim(0.25,1) +
-          theme_light() + 
-          scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
+          geom_smooth(aes(color = Region), se = FALSE) + 
+          theme_light() + ylim(0.25,1) +
+          scale_color_manual(values = col2[1:5]) +
           labs(x = xvars[variable], y = NULL) +
           theme(legend.position = "none", 
                 plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
@@ -512,18 +532,19 @@ flickr.mod.fun <- function(data) {
                                rot = 90))
   return(list(models = models,
               results = list(results = diagnostics, 
-                             boruta = boruta.df),
+                             boruta = boruta.df,
+                             pdp = pdp.data),
               plots = list(boruta = boruta.plot, 
-                           ice = pdp.ice.plots,
+                           pdp.all = pdp.var.plots,
+                           pdp.ice = pdp.ice.plots,
                            pdp = pdp.out)))
 }
 
 rural.model.results <- flickr.mod.fun(data = rural_data)
 public.model.results <- flickr.mod.fun(data = public_data)
 
-###############################################################################
-# Model visualizations and predictions
-###############################################################################
+
+# Model visualizations and predictions ------------------------------------
 
 # print model validation tables
 ## rural models
@@ -622,7 +643,7 @@ importance.plot <-
   geom_point(size = 2.5) + 
   coord_flip() + 
   scale_color_manual(values = c(rep("black", 5))) +
-  scale_fill_manual(values = c("black", lisa$GeneDavis[1:4])) +
+  scale_fill_manual(values = col2[c(1:5)]) +
   scale_shape_manual(values = c(21:25)) +
   labs(y = "Relative importance", x = "Variable") +
   facet_wrap(~ Access) +
@@ -633,9 +654,88 @@ importance.plot <-
 importance.plot
 ggsave("figures/rf_importance.png", width = 10, height = 5, dpi = 600)
 
+# PDPs combining across rural and public
+pdp.data.merge1 <- list()
+for(variable in c("elev", "slope", "rough", "shores", 
+                    "roads", "urbsmall", "urbmed", "urblarge")) {
+    pdp.data.merge1[[variable]] <- rural.model.results$results$pdp[["NFR"]][[variable]]
+    pdp.data.merge1[[variable]]$Access <- "All rural"
+}
+
+pdp.data.merge2 <- list()
+for(variable in c("elev", "slope", "rough", "shores", 
+                    "roads", "urbsmall", "urbmed", "urblarge")) {
+    pdp.data.merge2[[variable]] <- public.model.results$results$pdp[["NFR"]][[variable]]
+    pdp.data.merge2[[variable]]$Access <- "Public"
+}
+
+xvars <- c("Elevation (m)", "Slope (%)", "Roughness", "Dist. to road (m)",
+           "Dist. to shore (m)", "Small urban dist. (km)", 
+           "Medium urban dist. (km)", "Large urban dist. (km)")
+names(xvars) <- c("elev", "slope", "rough", "shores", 
+                  "roads", "urbsmall", "urbmed", "urblarge")
+pdp.NFR.plots <- list()
+for(variable in c("elev", "slope", "rough", "shores", 
+                  "roads", "urbsmall", "urbmed", "urblarge")) {
+  pdp.all <- bind_rows(as.data.frame(pdp.data.merge1[variable]), 
+                       as.data.frame(pdp.data.merge2[variable])) 
+  colnames(pdp.all) <- c(variable, "yhat", "region", "Access")
+  pdp.NFR.plots[[variable]] <- 
+    ggplot(pdp.all, aes_string(x = variable, y = "yhat", color = "Access")) +
+    geom_line() + 
+    geom_smooth(se = FALSE) + 
+    theme_light() + 
+    scale_color_manual(values = c("grey", "forestgreen")) +
+    labs(x = xvars[variable], y = NULL) + ylim(0.25, 1) +
+    theme(plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
+}
+
+pdp.data.merge1 <- rural.model.results$results$pdp[["NFR"]][["nlcd"]]
+pdp.data.merge1$Access <- "All rural"
+
+pdp.data.merge2 <- public.model.results$results$pdp[["NFR"]][["nlcd"]]
+pdp.data.merge2$Access <- "Public"
+pdp.all <- bind_rows(pdp.data.merge1, pdp.data.merge2)
+
+pdp.NFR.plots[["nlcd"]] <- 
+  ggplot(pdp.all, aes(x = nlcd, y = yhat, fill = Access)) +
+           geom_point(shape = 21, color = "black", size = 2) + 
+           theme_light() + 
+           scale_fill_manual(values = c("grey", "forestgreen")) +
+           labs(x = "Land cover", y = NULL) + ylim(0.25, 1) +
+           theme(plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
+
+pdp.NFR.out <- 
+  ggarrange(pdp.NFR.plots$elev, 
+            pdp.NFR.plots$slope + theme(axis.ticks.y = element_blank(), 
+                                        axis.text.y = element_blank()),
+            pdp.NFR.plots$rough + theme(axis.ticks.y = element_blank(), 
+                                        axis.text.y = element_blank()),
+            pdp.NFR.plots$urbsmall, 
+            pdp.NFR.plots$urbmed + theme(axis.ticks.y = element_blank(), 
+                                         axis.text.y = element_blank()),
+            pdp.NFR.plots$urblarge + theme(axis.ticks.y = element_blank(), 
+                                           axis.text.y = element_blank()),
+            pdp.NFR.plots$roads, 
+            pdp.NFR.plots$shores + theme(axis.ticks.y = element_blank(), 
+                                         axis.text.y = element_blank()),
+            pdp.NFR.plots$nlcd + theme(axis.ticks.y = element_blank(), 
+                                       axis.text.y = element_blank()),
+            nrow = 3, ncol = 3, align = "h",
+            labels = c("A", "B", "C", "D", "E", "F", "G", "H", "I"),
+            label.x = rep(c(0.12, 0.05, 0.05),3), label.y = 0.95, 
+            font.label = list(size = 12), common.legend = TRUE, legend = "bottom")
+pdp.NFR.out <- annotate_figure(pdp.NFR.out,
+                           left = text_grob(
+                             "Probability of nature-based engagement", 
+                             rot = 90))
+
+pdp.NFR.out
+ggsave("figures/pdp_NFR.png", width = 7, height = 7, dpi = 600)
+
 # plot PDPs for different spatial extents
 ## all rural (public + private)
-rural.model.results$plots$pdp 
+rural.model.results$plots$pdp
 ggsave("figures/pdp_rural.png", width = 7, height = 7, dpi = 600)
 
 ## public access rural areas
@@ -661,9 +761,9 @@ NFR_grid_full <- mutate(NFR_grid,
                         nlcd = as.factor(nlcd),
                         rough = (rough - cellStats(rastlist$rough, "mean"))/
                           cellStats(rastlist$rough, "sd")) %>%
-  filter(urban == "" & !is.na(elev) & !is.na(nlcd) & !is.na(roads) & 
-           !is.na(rough) & !is.na(shore) & !is.na(slope) & !is.na(urblarge) &
-           !is.na(urbmed) & !is.na(urbsmall))
+  dplyr::filter(urban == "" & !is.na(elev) & !is.na(nlcd) & !is.na(roads) & 
+                  !is.na(rough) & !is.na(shore) & !is.na(slope) & !is.na(urblarge) &
+                  !is.na(urbmed) & !is.na(urbsmall))
 
 NFR_pred_grid <- NFR_grid_full %>%
   dplyr::select(elev, nlcd, roads, rough, shores = shore, 
@@ -682,19 +782,22 @@ states.proj <- st_read("data/GIS/states_NFR_clipped_UTM.shp")
 
 ## plot predictions from rural model
 library(scico)
+library(ggnewscale)
 rur.pred.map <- 
   ggplot(NFR_rural_pred_df, aes(x = Lon, y = Lat, fill = `1`)) +
   geom_tile() +
-  geom_tile(data = urban_cells, inherit.aes = FALSE, 
-            aes(x = (EXT_MIN_X + EXT_MAX_X)/2,
-                y = (EXT_MIN_Y + EXT_MAX_Y)/2),
-            fill = "firebrick") +
-  geom_sf(data = states.proj, inherit.aes = FALSE, 
-          fill = "transparent", color = "black") +
   scale_fill_scico(palette = "nuuk") +
   labs(x = "", y = "Latitude", fill = "CES suitability") +
-  theme_minimal()
-
+  theme_minimal() +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = urban_cells, inherit.aes = FALSE, 
+            aes(x = (EXT_MIN_X + EXT_MAX_X)/2,
+                y = (EXT_MIN_Y + EXT_MAX_Y)/2,
+                fill = "Urban")) +
+  scale_fill_manual(values = "black", name = NULL) +
+  geom_sf(data = states.proj, inherit.aes = FALSE, 
+          fill = "transparent", color = "grey20")
+         
 rur.pred.map
 
 NFR_public_pred <- predict(public.model.results$models$NFR, 
@@ -707,27 +810,27 @@ NFR_public_pred_df <- cbind(NFR_public_pred_df, NFR_grid_full) %>%
 
 ## plot predictions from public model (just show public lands)
 pub.pred.map <- 
-  ggplot(filter(NFR_public_pred_df, OBJECTID %in% public_cells$OBJECTID), 
+  ggplot(NFR_public_pred_df, 
          aes(x = Lon, y = Lat, fill = `1`)) +
-  geom_tile() +
+  scale_fill_scico(palette = "nuuk") +
+  labs(x = "", y = "Latitude", fill = "CES suitability") +
+  theme_minimal() +
+  ggnewscale::new_scale_fill() +
   geom_tile(data = urban_cells, inherit.aes = FALSE, 
             aes(x = (EXT_MIN_X + EXT_MAX_X)/2,
-                y = (EXT_MIN_Y + EXT_MAX_Y)/2),
-            fill = "firebrick") +
-  geom_tile(data = filter(NFR_public_pred_df,OBJECTID %notin% public_cells$OBJECTID),
-            inherit.aes = FALSE, aes(x = Lon, y = Lat, fill = NULL), fill = "grey") +
+                y = (EXT_MIN_Y + EXT_MAX_Y)/2,
+                fill = "Urban")) +
+  scale_fill_manual(values = "black", name = NULL) +
   geom_sf(data = states.proj, inherit.aes = FALSE, 
-          fill = "transparent", color = "black") +
-  labs(x = "Longitude", y = "Latitude", fill = "CES suitability") +
-  scale_fill_scico(palette = "nuuk") +
-  theme_minimal()
+          fill = "transparent", color = "grey20")
 
-ggarrange(rur.pred.map, pub.pred.map,
-          nrow = 2, labels = c("A", "B"),
+pub.pred.map
+
+ggarrange(rur.pred.map, pub.pred.map, nrow = 2, labels = c("A", "B"), 
           common.legend = T, legend = "right")
 
 ggsave("figures/CES_suitability_maps.png", width = 6.5, height = 8, dpi = 600)
 
-# R version and package information
+# R version and package info ----------------------------------------------
 sessionInfo()
 
