@@ -31,13 +31,14 @@ library(pdp)
 library(reshape2) 
 library(ggplot2)
 library(lisa)
+library(colorspace)
 
 # load GIS data
 NFR <- st_read("data/GIS/baselayers/NFR.shp") # NFR extent
 rural_zone <- st_read("data/GIS/rural_regions.shp") # rural extent
 urban_zone <- st_read("data/GIS/urban_regions.shp") # urban area
 public_zone <- st_read("data/GIS/PADUS_NWI_merge_validate.shp") # public + water
-rastfiles <- list.files(path = "data/GIS/baselayers", patter = '.tif$',
+rastfiles <- list.files(path = "data/GIS/baselayers", pattern = '.tif$',
                         all.files = TRUE, full.names = TRUE)
 rastlist <- lapply(rastfiles, raster)
 names(rastlist) <- c("elev", "nlcd", "roads", "rough", "shores", 
@@ -70,33 +71,20 @@ rural_photos_coords <-
   rural_photos_clustered %>%
   dplyr::filter(!is.na(longitude) & !is.na(latitude) &
                   month(date) >= 5 & month(date) <= 9) %>%
-  dplyr::select(id, url, id, uniqueID, owner, date, 
+  dplyr::select(url, id, uniqueID, owner, date, 
                 state = STUSPS, longitude, latitude, theme)
+
+# randomly subset image data to single PUDs per theme
+rural_photos_PUDs <- 
+  rural_photos_coords %>%
+  slice(sample(1:n())) %>%
+  distinct(owner, date, theme, .keep_all = TRUE)
 
 # create shapefile for images from XY coordinates
 rural_images <- 
-  sf::st_as_sf(rural_photos_coords, 
+  sf::st_as_sf(rural_photos_PUDs, 
                coords = c("longitude", "latitude")) %>%
   st_set_crs(4326)
-
-# make empty sq km grid
-NFR.albers <- NFR %>% st_transform(5070)
-NFR.grid = st_make_grid(NFR.albers, c(1000, 1000), 
-                        what = "polygons", square = TRUE) 
-NFR.grid.centroids = 
-
-
-%>% 
-  st_transform(4326) %>%
-  st_sf()
-
-NFR.grid.centroids <- st_cast(plot_locations_df, "POLYGON")
-plot_locations_df
-
-
-NFR.grid.clip <- st_intersection(NFR.grid, NFR)
-
-
 
 # attach extracted raster values to image dataset
 rural_images_geo <- matrix(nrow = nrow(rural_images), 
@@ -112,6 +100,8 @@ rural_images_geo$pa <- 1
 
 # CREATE RANDOM BACKGROUND POINTS IN RURAL ZONE (and link spatial covariates)
 states <- st_read("data/GIS/baselayers/states.shp") %>% st_set_crs(4326)
+
+set.seed(123)
 bg_pts <-st_as_sf(st_sample(rural_zone, 10000))
 bg_pts_geo <- matrix(nrow = 10000, 
                      ncol = length(names(raststack)),
@@ -128,6 +118,8 @@ bg_tibble <- as_tibble(bg_pts_geo) %>%
 
 # CREATE RANDOM BACKGROUND POINTS IN PUBLIC ZONE (and link spatial covariates)
 public_zone_sf <- st_as_sf(public_zone)
+
+set.seed(123)
 bg_pts_pub <-st_as_sf(st_sample(public_zone, 10000))
 bg_pts_pub_geo <- matrix(nrow = 10000, 
                          ncol = length(names(raststack)),
@@ -161,10 +153,12 @@ public_data <- rural_data %>%
   filter(id %in% flickr_public$id) %>%
   dplyr::select(-id) %>%
   bind_rows(bg_pub_tibble) %>%
-  mutate(rough = (rough - cellStats(rastlist$rough, "mean"))/cellStats(rastlist$rough, "sd"))
+  mutate(rough = (rough - cellStats(rastlist$rough, "mean"))/
+           cellStats(rastlist$rough, "sd"))
 
 rural_data <- dplyr::select(rural_data, -id) %>%
-  mutate(rough = (rough - cellStats(rastlist$rough, "mean"))/cellStats(rastlist$rough, "sd"))
+  mutate(rough = (rough - cellStats(rastlist$rough, "mean"))/
+           cellStats(rastlist$rough, "sd"))
 
 
 # Random forest models ----------------------------------------------------
@@ -402,12 +396,12 @@ flickr.mod.fun <- function(data) {
       pdp.data[[location]][[variable]] <- 
         rf.mod.pred %>% 
         pdp::partial(pred.var = variable, rug = TRUE, grid.resolution = 100, 
-                prob = TRUE, which.class = 2, 
-                train = train[sample(nrow(train), 500),]) %>%
+                     prob = TRUE, which.class = 2, 
+                     train = train[sample(nrow(train), 500),]) %>%
         as_tibble() %>%
         mutate(Region = location)
     }
-    print(paste0(location, " done!"))
+    print(paste0(location, " models done!"))
   }
   # merge together predictions across regions
   pdp.data.merge <- list()
@@ -418,7 +412,7 @@ flickr.mod.fun <- function(data) {
                                             pdp.data[["NH"]][[variable]],
                                             pdp.data[["ME"]][[variable]])
     pdp.data.merge[[variable]]$Region <- 
-      factor(pdp.data.merge[[variable]]$location, 
+      factor(pdp.data.merge[[variable]]$Region, 
              levels = c("NFR", "NY", "VT", "NH", "ME"))
   }
   
@@ -458,7 +452,7 @@ flickr.mod.fun <- function(data) {
                             y = "yhat")) + 
           geom_point(aes(shape = Region, fill = Region), size = 2) +
           scale_color_manual(values = c(rep("black", 5))) +
-          scale_fill_manual(values = col2[c(1:5)]) +
+          scale_fill_manual(values = c("black", lisa$GeneDavis[1:4])) +
           scale_shape_manual(values = c(21:25)) +
           theme_light() + ylim(0.4,1) +
           labs(x = xvars[variable], y = NULL) +
@@ -470,12 +464,12 @@ flickr.mod.fun <- function(data) {
           ggplot(aes_string(x = variable, 
                             y = "yhat")) + 
           geom_line(aes(color = Region)) + 
-          geom_smooth(aes(color = Region), se = FALSE) 
+          geom_smooth(aes(color = Region), se = FALSE) +
           theme_light() + ylim(0.4,1) +
-        scale_color_manual(values = col2[c(1:5)]) +
-        labs(x = xvars[variable], y = NULL) +
-        theme(legend.position = "none", 
-              plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
+          scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
+          labs(x = xvars[variable], y = NULL) +
+          theme(legend.position = "none", 
+                plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
       }
     } else {
       if(is.factor(as.data.frame(pdp.data.merge[[variable]])[,variable])) {
@@ -485,7 +479,7 @@ flickr.mod.fun <- function(data) {
                             y = "yhat")) + 
           geom_point(aes(shape = Region, fill = Region), size = 2) +
           scale_color_manual(values = c(rep("black", 5))) +
-          scale_fill_manual(values = col2[c(1:5)]) +
+          scale_fill_manual(values = c("black", lisa$GeneDavis[1:4])) +
           scale_shape_manual(values = c(21:25)) +
           theme_light() + ylim(0.25,1) +
           labs(x = xvars[variable], y = NULL) +
@@ -499,7 +493,7 @@ flickr.mod.fun <- function(data) {
           geom_line(aes(color = Region)) + 
           geom_smooth(aes(color = Region), se = FALSE) + 
           theme_light() + ylim(0.25,1) +
-          scale_color_manual(values = col2[1:5]) +
+          scale_color_manual(values = c("black", lisa$GeneDavis[1:4])) +
           labs(x = xvars[variable], y = NULL) +
           theme(legend.position = "none", 
                 plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
@@ -548,24 +542,25 @@ public.model.results <- flickr.mod.fun(data = public_data)
 
 # print model validation tables
 ## rural models
+regions <- c("NFR", "NY", "VT", "NH", "ME")
 rural.accuracy <- rural.model.results$results$results %>%
   select(from, to, accuracy) %>%
-  mutate(from = factor(from, levels = c("NFR", "NY", "VT", "NH", "ME")),
-         to = factor(to, levels = c("NFR", "NY", "VT", "NH", "ME"))) %>%
+  mutate(from = factor(from, levels = regions),
+         to = factor(to, levels = regions)) %>%
   dcast(from ~ to) %>%
   mutate(statistic = "accuracy")
 
 rural.sensitivity <- rural.model.results$results$results %>%
   select(from, to, sensitivity) %>%
-  mutate(from = factor(from, levels = c("NFR", "NY", "VT", "NH", "ME")),
-         to = factor(to, levels = c("NFR", "NY", "VT", "NH", "ME"))) %>%
+  mutate(from = factor(from, levels = regions),
+         to = factor(to, levels = regions)) %>%
   dcast(from ~ to) %>%
   mutate(statistic = "sensitivity")
 
 rural.specificity <- rural.model.results$results$results %>%
   select(from, to, specificity) %>%
-  mutate(from = factor(from, levels = c("NFR", "NY", "VT", "NH", "ME")),
-         to = factor(to, levels = c("NFR", "NY", "VT", "NH", "ME"))) %>%
+  mutate(from = factor(from, levels = regions),
+         to = factor(to, levels = regions)) %>%
   dcast(from ~ to) %>%
   mutate(statistic = "specificity")
 
@@ -575,22 +570,22 @@ write.csv(rural.diagnostics, "data/rural_model_diagnostics.csv", row.names = FAL
 ## public models
 public.accuracy <- public.model.results$results$results %>%
   select(from, to, accuracy) %>%
-  mutate(from = factor(from, levels = c("NFR", "NY", "VT", "NH", "ME")),
-         to = factor(to, levels = c("NFR", "NY", "VT", "NH", "ME"))) %>%
+  mutate(from = factor(from, levels = regions),
+         to = factor(to, levels = regions)) %>%
   dcast(from ~ to) %>%
   mutate(statistic = "accuracy")
 
 public.sensitivity <- public.model.results$results$results %>%
   select(from, to, sensitivity) %>%
-  mutate(from = factor(from, levels = c("NFR", "NY", "VT", "NH", "ME")),
-         to = factor(to, levels = c("NFR", "NY", "VT", "NH", "ME"))) %>%
+  mutate(from = factor(from, levels = regions),
+         to = factor(to, levels = regions)) %>%
   dcast(from ~ to) %>%
   mutate(statistic = "sensitivity")
 
 public.specificity <- public.model.results$results$results %>%
   select(from, to, specificity) %>%
-  mutate(from = factor(from, levels = c("NFR", "NY", "VT", "NH", "ME")),
-         to = factor(to, levels = c("NFR", "NY", "VT", "NH", "ME"))) %>%
+  mutate(from = factor(from, levels = regions),
+         to = factor(to, levels = regions)) %>%
   dcast(from ~ to) %>%
   mutate(statistic = "specificity")
 
@@ -599,7 +594,7 @@ write.csv(public.diagnostics, "data/public_model_diagnostics.csv", row.names = F
 
 all.diagnostics <- data.frame(
   test = rep(c("accuracy", "sensitivity", "specificity"), each = 5),
-  from = rep(c("NFR", "NY", "VT", "NH", "ME"),3),
+  from = rep(regions, 3),
   NFR = paste0(round(rural.diagnostics$NFR,3)," (", 
                round(public.diagnostics$NFR,3),")"),
   NY = paste0(round(rural.diagnostics$NY,3)," (", 
@@ -632,7 +627,7 @@ var.order <- rural.boruta %>%
 
 importance.plot <- 
   importance.results %>%
-  mutate(Scale = factor(Scale, levels = c("NFR", "NY", "VT", "NH", "ME"))) %>%
+  mutate(Scale = factor(Scale, levels = regions)) %>%
   ggplot(aes(x = factor(Variable, levels = var.order),
              y = rel_imp, 
              shape = Scale, color = Scale, fill = Scale)) +
@@ -643,7 +638,7 @@ importance.plot <-
   geom_point(size = 2.5) + 
   coord_flip() + 
   scale_color_manual(values = c(rep("black", 5))) +
-  scale_fill_manual(values = col2[c(1:5)]) +
+  scale_fill_manual(values = c("black", lisa$GeneDavis[1:4])) +
   scale_shape_manual(values = c(21:25)) +
   labs(y = "Relative importance", x = "Variable") +
   facet_wrap(~ Access) +
@@ -657,16 +652,16 @@ ggsave("figures/rf_importance.png", width = 10, height = 5, dpi = 600)
 # PDPs combining across rural and public
 pdp.data.merge1 <- list()
 for(variable in c("elev", "slope", "rough", "shores", 
-                    "roads", "urbsmall", "urbmed", "urblarge")) {
-    pdp.data.merge1[[variable]] <- rural.model.results$results$pdp[["NFR"]][[variable]]
-    pdp.data.merge1[[variable]]$Access <- "All rural"
+                  "roads", "urbsmall", "urbmed", "urblarge")) {
+  pdp.data.merge1[[variable]] <- rural.model.results$results$pdp[["NFR"]][[variable]]
+  pdp.data.merge1[[variable]]$Access <- "All rural"
 }
 
 pdp.data.merge2 <- list()
 for(variable in c("elev", "slope", "rough", "shores", 
-                    "roads", "urbsmall", "urbmed", "urblarge")) {
-    pdp.data.merge2[[variable]] <- public.model.results$results$pdp[["NFR"]][[variable]]
-    pdp.data.merge2[[variable]]$Access <- "Public"
+                  "roads", "urbsmall", "urbmed", "urblarge")) {
+  pdp.data.merge2[[variable]] <- public.model.results$results$pdp[["NFR"]][[variable]]
+  pdp.data.merge2[[variable]]$Access <- "Public"
 }
 
 xvars <- c("Elevation (m)", "Slope (%)", "Roughness", "Dist. to road (m)",
@@ -699,11 +694,11 @@ pdp.all <- bind_rows(pdp.data.merge1, pdp.data.merge2)
 
 pdp.NFR.plots[["nlcd"]] <- 
   ggplot(pdp.all, aes(x = nlcd, y = yhat, fill = Access)) +
-           geom_point(shape = 21, color = "black", size = 2) + 
-           theme_light() + 
-           scale_fill_manual(values = c("grey", "forestgreen")) +
-           labs(x = "Land cover", y = NULL) + ylim(0.25, 1) +
-           theme(plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
+  geom_point(shape = 21, color = "black", size = 2) + 
+  theme_light() + 
+  scale_fill_manual(values = c("grey", "forestgreen")) +
+  labs(x = "Land cover", y = NULL) + ylim(0.25, 1) +
+  theme(plot.margin=unit(c(0.1,0.4,0.1,0.1),"cm"))
 
 pdp.NFR.out <- 
   ggarrange(pdp.NFR.plots$elev, 
@@ -726,9 +721,9 @@ pdp.NFR.out <-
             label.x = rep(c(0.12, 0.05, 0.05),3), label.y = 0.95, 
             font.label = list(size = 12), common.legend = TRUE, legend = "bottom")
 pdp.NFR.out <- annotate_figure(pdp.NFR.out,
-                           left = text_grob(
-                             "Probability of nature-based engagement", 
-                             rot = 90))
+                               left = text_grob(
+                                 "Probability of nature-based engagement", 
+                                 rot = 90))
 
 pdp.NFR.out
 ggsave("figures/pdp_NFR.png", width = 7, height = 7, dpi = 600)
@@ -762,11 +757,11 @@ NFR_grid_full <- mutate(NFR_grid,
                         rough = (rough - cellStats(rastlist$rough, "mean"))/
                           cellStats(rastlist$rough, "sd")) %>%
   dplyr::filter(urban == "" & !is.na(elev) & !is.na(nlcd) & !is.na(roads) & 
-                  !is.na(rough) & !is.na(shore) & !is.na(slope) & !is.na(urblarge) &
+                  !is.na(rough) & !is.na(shores) & !is.na(slope) & !is.na(urblarge) &
                   !is.na(urbmed) & !is.na(urbsmall))
 
 NFR_pred_grid <- NFR_grid_full %>%
-  dplyr::select(elev, nlcd, roads, rough, shores = shore, 
+  dplyr::select(elev, nlcd, roads, rough, shores, 
                 slope, urblarge, urbmed, urbsmall)
 
 NFR_rural_pred <- predict(rural.model.results$models$NFR, 
@@ -778,26 +773,28 @@ NFR_rural_pred_df <- cbind(NFR_rural_pred_df, NFR_grid_full) %>%
          Lon = (EXT_MIN_X + EXT_MAX_X)/2)
 
 # project state shapefile and add to plot
-states.proj <- st_read("data/GIS/states_NFR_clipped_UTM.shp") 
+states.proj <- st_read("data/GIS/states_NFR_clipped_cleaned_UTM.shp", crs = 5070)
 
 ## plot predictions from rural model
 library(scico)
 library(ggnewscale)
+library(viridis)
+
 rur.pred.map <- 
   ggplot(NFR_rural_pred_df, aes(x = Lon, y = Lat, fill = `1`)) +
   geom_tile() +
-  scale_fill_scico(palette = "nuuk") +
-  labs(x = "", y = "Latitude", fill = "CES suitability") +
+  scale_fill_scico(palette = "roma", direction = -1) +
+  labs(x = "", y = "Latitude", fill = "CES engagement") +
   theme_minimal() +
   ggnewscale::new_scale_fill() +
   geom_tile(data = urban_cells, inherit.aes = FALSE, 
             aes(x = (EXT_MIN_X + EXT_MAX_X)/2,
-                y = (EXT_MIN_Y + EXT_MAX_Y)/2,
-                fill = "Urban")) +
+                y = (EXT_MIN_Y + EXT_MAX_Y)/2, fill = "Urban")) +
   scale_fill_manual(values = "black", name = NULL) +
   geom_sf(data = states.proj, inherit.aes = FALSE, 
-          fill = "transparent", color = "grey20")
-         
+          fill = "transparent", color = "grey20") +
+  theme(legend.justification = "left")
+
 rur.pred.map
 
 NFR_public_pred <- predict(public.model.results$models$NFR, 
@@ -812,25 +809,95 @@ NFR_public_pred_df <- cbind(NFR_public_pred_df, NFR_grid_full) %>%
 pub.pred.map <- 
   ggplot(NFR_public_pred_df, 
          aes(x = Lon, y = Lat, fill = `1`)) +
-  scale_fill_scico(palette = "nuuk") +
+  geom_tile() +
+  scale_fill_scico(palette = "roma", direction = -1) +
   labs(x = "", y = "Latitude", fill = "CES suitability") +
   theme_minimal() +
   ggnewscale::new_scale_fill() +
   geom_tile(data = urban_cells, inherit.aes = FALSE, 
             aes(x = (EXT_MIN_X + EXT_MAX_X)/2,
-                y = (EXT_MIN_Y + EXT_MAX_Y)/2,
-                fill = "Urban")) +
-  scale_fill_manual(values = "black", name = NULL) +
+                y = (EXT_MIN_Y + EXT_MAX_Y)/2, fill = "Urban")) +
+  scale_fill_manual(values = "black", name = NULL, guide = "none") +
   geom_sf(data = states.proj, inherit.aes = FALSE, 
-          fill = "transparent", color = "grey20")
+          fill = "transparent", color = "grey20") +
+  theme(legend.justification = "left")
 
 pub.pred.map
 
 ggarrange(rur.pred.map, pub.pred.map, nrow = 2, labels = c("A", "B"), 
-          common.legend = T, legend = "right")
+          common.legend = F, legend = "right", align = "hv")
 
 ggsave("figures/CES_suitability_maps.png", width = 6.5, height = 8, dpi = 600)
 
+## plot state-level predictions from state-level models
+rural.pred.list <- list()
+public.pred.list <- list()
+for(scale in c("rural", "public")) {
+  for(state in c("NY", "VT", "NH", "ME")) {
+    if(scale == "rural") {
+      # predict for state
+      pred <- predict(rural.model.results$models[[state]], 
+                      data = NFR_pred_grid)
+      pred_df <- as.data.frame(pred$predictions)
+      pred_df <- cbind(pred_df, NFR_grid_full) %>%
+      mutate(Lat = (EXT_MIN_Y + EXT_MAX_Y)/2,
+             Lon = (EXT_MIN_X + EXT_MAX_X)/2)
+      # plot for state
+      rural.pred.list[[state]] <- 
+        ggplot(pred_df[pred_df$STUSPS2 == state,], 
+               aes(x = Lon, y = Lat, fill = `1`)) +
+        geom_tile() +
+        scale_fill_scico(palette = "nuuk", limits = c(0,1)) +
+        labs(x = "", y = "Latitude", fill = "CES engagement") +
+        theme_minimal() +
+        ggnewscale::new_scale_fill() +
+        geom_tile(data = urban_cells[urban_cells$STUSPS2 == state,], 
+                  inherit.aes = FALSE, 
+                  aes(x = (EXT_MIN_X + EXT_MAX_X)/2,
+                      y = (EXT_MIN_Y + EXT_MAX_Y)/2, fill = "Urban")) +
+        scale_fill_manual(values = "black", name = NULL) +
+        geom_sf(data = states.proj[states.proj$STUSPS == state,], 
+                inherit.aes = FALSE, 
+                fill = "transparent", color = "grey20") +
+        theme(legend.justification = "left")
+    } else {
+      # predict for state
+      pred <- predict(public.model.results$models[[state]], 
+                      data = NFR_pred_grid)
+      pred_df <- as.data.frame(pred$predictions)
+      pred_df <- cbind(pred_df, NFR_grid_full) %>%
+        mutate(Lat = (EXT_MIN_Y + EXT_MAX_Y)/2,
+               Lon = (EXT_MIN_X + EXT_MAX_X)/2)
+      # plot for state
+      public.pred.list[[state]] <- 
+        ggplot(pred_df[pred_df$STUSPS2 == state,], 
+               aes(x = Lon, y = Lat, fill = `1`)) +
+        geom_tile() +
+        scale_fill_scico(palette = "nuuk", limits = c(0,1)) +
+        labs(x = "", y = "Latitude", fill = "CES suitability") +
+        theme_minimal() +
+        ggnewscale::new_scale_fill() +
+        geom_tile(data = urban_cells[urban_cells$STUSPS2 == state,], 
+                  inherit.aes = FALSE, 
+                  aes(x = (EXT_MIN_X + EXT_MAX_X)/2,
+                      y = (EXT_MIN_Y + EXT_MAX_Y)/2, fill = "Urban")) +
+        scale_fill_manual(values = "black", name = NULL, guide = "none") +
+        geom_sf(data = states.proj[states.proj$STUSPS == state,], 
+                inherit.aes = FALSE, 
+                fill = "transparent", color = "grey20") +
+        theme(legend.justification = "left")
+    }
+  }
+}
+
+# loop through and save each series of state-level CES plots
+for(state in c("NY", "VT", "NH", "ME")) {
+  ggarrange(rural.pred.list[[state]], public.pred.list[[state]], 
+            nrow = 2, labels = c("A", "B"), common.legend = F, 
+            legend = "right", align = "hv")
+  ggsave(paste0("figures/CES_suitability_maps_", state, ".png"), 
+                width = 6.5, height = 8, dpi = 600)
+}
+  
 # R version and package info ----------------------------------------------
 sessionInfo()
-

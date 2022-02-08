@@ -781,7 +781,7 @@ total.rural.themes.by.state %>%
   ggplot(aes(x = State, prop)) +
   geom_col(aes(fill = State)) +
   labs(x = "State", y = "Proportion of images") +
-  scale_fill_manual(values = col2[2:5]) +
+  scale_fill_manual(values = lisa$GeneDavis[1:4]) +
   facet_wrap(~factor(theme, levels = total.themes$theme)) +
   theme_bw() + mythemes + theme(legend.position = c(0.9, 0.15),
                                 legend.text = element_text(size = 12),
