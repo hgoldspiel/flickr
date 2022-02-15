@@ -489,8 +489,8 @@ opt.mod <- rural_mcmc_wt$tune_grid[
 # plot full 2D modularity grid
 ggplot(rural_mcmc_wt$tune_grid, 
        aes(x = cluster, y = step, z = mod, fill = mod)) +
-  geom_tile() + 
-  geom_tile(data = opt.mod, color = "red", size = 2) +
+  geom_tile(color = "black") + 
+  geom_tile(data = opt.mod, color = "red", size = 1.5) +
   scale_x_continuous(breaks = seq(2, max(rural_mcmc_wt$cluster_seq), 2), 
                      expand = c(0, 0)) + 
   scale_y_continuous(breaks = seq(min(rural_mcmc_wt$step_seq), 

@@ -592,6 +592,7 @@ public.specificity <- public.model.results$results$results %>%
 public.diagnostics <- rbind(public.accuracy, public.sensitivity, public.specificity)
 write.csv(public.diagnostics, "data/public_model_diagnostics.csv", row.names = FALSE)
 
+# combine all diagnostics in one table
 all.diagnostics <- data.frame(
   test = rep(c("accuracy", "sensitivity", "specificity"), each = 5),
   from = rep(regions, 3),
@@ -667,11 +668,11 @@ for(variable in c("elev", "slope", "rough", "shores",
 xvars <- c("Elevation (m)", "Slope (%)", "Roughness", "Dist. to road (m)",
            "Dist. to shore (m)", "Small urban dist. (km)", 
            "Medium urban dist. (km)", "Large urban dist. (km)")
-names(xvars) <- c("elev", "slope", "rough", "shores", 
-                  "roads", "urbsmall", "urbmed", "urblarge")
+names(xvars) <- c("elev", "slope", "rough", "roads", 
+                  "shores", "urbsmall", "urbmed", "urblarge")
 pdp.NFR.plots <- list()
-for(variable in c("elev", "slope", "rough", "shores", 
-                  "roads", "urbsmall", "urbmed", "urblarge")) {
+for(variable in c("elev", "slope", "rough", "roads", 
+                  "shores", "urbsmall", "urbmed", "urblarge")) {
   pdp.all <- bind_rows(as.data.frame(pdp.data.merge1[variable]), 
                        as.data.frame(pdp.data.merge2[variable])) 
   colnames(pdp.all) <- c(variable, "yhat", "region", "Access")
@@ -778,12 +779,11 @@ states.proj <- st_read("data/GIS/states_NFR_clipped_cleaned_UTM.shp", crs = 5070
 ## plot predictions from rural model
 library(scico)
 library(ggnewscale)
-library(viridis)
 
 rur.pred.map <- 
   ggplot(NFR_rural_pred_df, aes(x = Lon, y = Lat, fill = `1`)) +
   geom_tile() +
-  scale_fill_scico(palette = "roma", direction = -1) +
+  scale_fill_scico(palette = "roma", direction = -1, limits = c(0,0.8)) +
   labs(x = "", y = "Latitude", fill = "CES engagement") +
   theme_minimal() +
   ggnewscale::new_scale_fill() +
@@ -792,7 +792,7 @@ rur.pred.map <-
                 y = (EXT_MIN_Y + EXT_MAX_Y)/2, fill = "Urban")) +
   scale_fill_manual(values = "black", name = NULL) +
   geom_sf(data = states.proj, inherit.aes = FALSE, 
-          fill = "transparent", color = "grey20") +
+          fill = "transparent", color = "grey20", lwd = 0.5) +
   theme(legend.justification = "left")
 
 rur.pred.map
@@ -810,7 +810,7 @@ pub.pred.map <-
   ggplot(NFR_public_pred_df, 
          aes(x = Lon, y = Lat, fill = `1`)) +
   geom_tile() +
-  scale_fill_scico(palette = "roma", direction = -1) +
+  scale_fill_scico(palette = "roma", direction = -1, limits = c(0,0.8)) +
   labs(x = "", y = "Latitude", fill = "CES suitability") +
   theme_minimal() +
   ggnewscale::new_scale_fill() +
@@ -819,7 +819,7 @@ pub.pred.map <-
                 y = (EXT_MIN_Y + EXT_MAX_Y)/2, fill = "Urban")) +
   scale_fill_manual(values = "black", name = NULL, guide = "none") +
   geom_sf(data = states.proj, inherit.aes = FALSE, 
-          fill = "transparent", color = "grey20") +
+          fill = "transparent", color = "grey20", lwd = 0.5) +
   theme(legend.justification = "left")
 
 pub.pred.map
@@ -847,7 +847,7 @@ for(scale in c("rural", "public")) {
         ggplot(pred_df[pred_df$STUSPS2 == state,], 
                aes(x = Lon, y = Lat, fill = `1`)) +
         geom_tile() +
-        scale_fill_scico(palette = "nuuk", limits = c(0,1)) +
+        scale_fill_scico(palette = "roma", direction = -1, limits = c(0,1)) +
         labs(x = "", y = "Latitude", fill = "CES engagement") +
         theme_minimal() +
         ggnewscale::new_scale_fill() +
@@ -873,7 +873,7 @@ for(scale in c("rural", "public")) {
         ggplot(pred_df[pred_df$STUSPS2 == state,], 
                aes(x = Lon, y = Lat, fill = `1`)) +
         geom_tile() +
-        scale_fill_scico(palette = "nuuk", limits = c(0,1)) +
+        scale_fill_scico(palette = "roma", direction = -1, limits = c(0,1)) +
         labs(x = "", y = "Latitude", fill = "CES suitability") +
         theme_minimal() +
         ggnewscale::new_scale_fill() +
