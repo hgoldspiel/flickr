@@ -811,7 +811,7 @@ pub.pred.map <-
          aes(x = Lon, y = Lat, fill = `1`)) +
   geom_tile() +
   scale_fill_scico(palette = "roma", direction = -1, limits = c(0,0.8)) +
-  labs(x = "", y = "Latitude", fill = "CES suitability") +
+  labs(x = "Longitude", y = "Latitude", fill = "CES suitability") +
   theme_minimal() +
   ggnewscale::new_scale_fill() +
   geom_tile(data = urban_cells, inherit.aes = FALSE, 
@@ -874,7 +874,7 @@ for(scale in c("rural", "public")) {
                aes(x = Lon, y = Lat, fill = `1`)) +
         geom_tile() +
         scale_fill_scico(palette = "roma", direction = -1, limits = c(0,1)) +
-        labs(x = "", y = "Latitude", fill = "CES suitability") +
+        labs(x = "Longitude", y = "Latitude", fill = "CES suitability") +
         theme_minimal() +
         ggnewscale::new_scale_fill() +
         geom_tile(data = urban_cells[urban_cells$STUSPS2 == state,], 
