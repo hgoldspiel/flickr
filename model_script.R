@@ -898,6 +898,21 @@ for(state in c("NY", "VT", "NH", "ME")) {
   ggsave(paste0("figures/CES_suitability_maps_", state, ".png"), 
                 width = 6.5, height = 8, dpi = 600)
 }
-  
+
+# make a composite state figure
+ggarrange(rural.pred.list$NY + theme(legend.position = "none"), 
+                       rural.pred.list$VT + theme(legend.position = "none"), 
+                       rural.pred.list$NH + theme(legend.position = "none"), 
+                       rural.pred.list$ME, 
+                       public.pred.list$NY + theme(legend.position = "none"),
+                       public.pred.list$VT + theme(legend.position = "none"),
+                       public.pred.list$NH + theme(legend.position = "none"), 
+                       public.pred.list$ME,
+                       nrow = 2, ncol = 4, common.legend = FALSE,
+                       labels = LETTERS[1:8])
+
+ggsave("figures/CES_suitability_maps_all_states.png", 
+       width = 16, height = 8, dpi = 600)
+
 # R version and package info ----------------------------------------------
 sessionInfo()
